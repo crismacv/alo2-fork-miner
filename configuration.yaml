@@ -11,10 +11,6 @@ pipeline:
 benchmark: true
 
 llm_clients:
-  openrouter:
-    enabled: false
-    base_url: "https://openrouter.ai/api/v1"
-    api_key_env: "OPENROUTER_API_KEY"
   vision-coder:
     enabled: true
     base_url: "http://localhost:8001/v1"

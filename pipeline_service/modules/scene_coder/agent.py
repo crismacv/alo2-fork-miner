@@ -39,7 +39,7 @@ class SceneCoderAgent:
         max_tokens: int = 8192,
         max_tool_iters: int = 4,
         max_output_retries: int = 2,
-        backend: str = "openrouter",
+        backend: str = "vllm",
         total_stages: int = 7,
     ) -> None:
         self.client = client

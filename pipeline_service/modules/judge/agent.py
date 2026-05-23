@@ -25,7 +25,7 @@ class JudgeAgent:
         seed: int | None = 42,
         max_retries: int = 2,
         reasoning_effort: str | None = None,
-        backend: str = "openrouter",
+        backend: str = "vllm",
     ) -> None:
         self.client = client
         self.model = model

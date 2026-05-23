@@ -49,7 +49,7 @@ class ScenePlannerAgent:
         max_tokens: int = 4096,
         max_tool_iters: int = 4,
         reasoning_effort: str | None = None,
-        backend: str = "openrouter",
+        backend: str = "vllm",
     ) -> None:
         self.client = client
         self.model = model

@@ -60,7 +60,7 @@ class SessionAgent(Generic[T]):
         max_tool_iters: int = 8,
         max_validation_retries: int = 3,
         reasoning_effort: str | None = None,
-        backend: str = "openrouter",
+        backend: str = "vllm",
     ) -> None:
         self.task_id = task_id
         self.actor = actor

@@ -89,7 +89,7 @@ class CriticAgent:
         max_retries: int = 2,
         reasoning_effort: str | None = None,
         ensemble_size: int = 1,
-        backend: str = "openrouter",
+        backend: str = "vllm",
         total_stages: int = 7,
     ) -> None:
         self.client = client
@@ -145,7 +145,7 @@ async def run_critic(
     max_retries: int = 2,
     reasoning_effort: str | None = None,
     ensemble_size: int = 1,
-    backend: str = "openrouter",
+    backend: str = "vllm",
     total_stages: int = 7,
     critic_stage: int = 5,
 ) -> CriticReport:

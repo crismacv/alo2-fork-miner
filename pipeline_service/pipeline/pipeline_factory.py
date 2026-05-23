@@ -58,7 +58,7 @@ def build_pipeline(
 
     def _backend(actor_client: str) -> str:
         cfg = llm.get(actor_client)
-        return cfg.backend if cfg is not None else "openrouter"
+        return cfg.backend if cfg is not None else "vllm"
 
     if use_planner:
         planner: ScenePlannerAgent | None = ScenePlannerAgent(
