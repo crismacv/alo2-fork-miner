@@ -508,6 +508,113 @@ Key idioms:
   wheel), unlike the road wheels which use `rotation.z = Math.PI/2`.
 - `fitToUnitCube` is still mandatory even for large multi-part assemblies.
 
+### Example 3b — Multi-subject scene (coffee cup ON a saucer)
+
+Reference summary:
+> A ceramic coffee cup sitting on top of a round flat saucer. TWO distinct
+> objects; the saucer extends past the cup base on all sides. Both must
+> appear in the render — most miners model only the cup and lose ~40% of
+> the visible silhouette.
+
+Pattern to reuse:
+
+```javascript
+export default function generate(THREE) {
+  const root = new THREE.Group();
+
+  // --- materials (shared by both subjects) ---
+  const ceramicMat = new THREE.MeshStandardMaterial({
+    color: 0xf2efe6, metalness: 0.0, roughness: 0.4,
+  });
+  const innerMat = new THREE.MeshStandardMaterial({
+    color: 0x3a2716, metalness: 0.0, roughness: 0.6,  // coffee
+  });
+
+  // --- subject A: saucer (modeled FIRST so the cup sits on top of it) ---
+  const saucer = new THREE.Group();
+  const saucerR = 0.55;
+  const saucerThick = 0.04;
+  const saucerBase = new THREE.Mesh(
+    new THREE.CylinderGeometry(saucerR, saucerR * 0.92, saucerThick, 48),
+    ceramicMat,
+  );
+  saucerBase.position.y = saucerThick / 2;
+  saucer.add(saucerBase);
+  // Slight inner well so the cup foot has a place to rest:
+  const saucerWell = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.22, 0.22, 0.008, 32),
+    ceramicMat,
+  );
+  saucerWell.position.y = saucerThick + 0.004;
+  saucer.add(saucerWell);
+  root.add(saucer);
+
+  // --- subject B: cup, positioned ABOVE the saucer well ---
+  const cup = new THREE.Group();
+  const cupR = 0.2;
+  const cupH = 0.32;
+  // Body: cylinder open at top
+  const cupBody = new THREE.Mesh(
+    new THREE.CylinderGeometry(cupR, cupR * 0.88, cupH, 48, 1, true),
+    ceramicMat,
+  );
+  cupBody.position.y = cupH / 2;
+  cup.add(cupBody);
+  // Solid bottom disk so it doesn't look hollow from below:
+  const cupBottom = new THREE.Mesh(
+    new THREE.CylinderGeometry(cupR * 0.88, cupR * 0.88, 0.01, 32),
+    ceramicMat,
+  );
+  cupBottom.position.y = 0.005;
+  cup.add(cupBottom);
+  // Coffee surface (slightly recessed):
+  const coffee = new THREE.Mesh(
+    new THREE.CylinderGeometry(cupR * 0.96, cupR * 0.96, 0.005, 32),
+    innerMat,
+  );
+  coffee.position.y = cupH - 0.02;
+  cup.add(coffee);
+  // Handle: torus arc on +X side
+  const handle = new THREE.Mesh(
+    new THREE.TorusGeometry(0.085, 0.02, 12, 32, Math.PI),
+    ceramicMat,
+  );
+  handle.position.set(cupR + 0.02, cupH / 2, 0);
+  handle.rotation.y = Math.PI / 2;
+  cup.add(handle);
+  // Place cup ON TOP of saucer well (not floating):
+  cup.position.y = saucerThick + 0.008;
+  root.add(cup);
+
+  fitToUnitCube(THREE, root);
+  return root;
+}
+
+function fitToUnitCube(THREE, root) {
+  const box = new THREE.Box3().setFromObject(root);
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  box.getSize(size);
+  box.getCenter(center);
+  const maxDim = Math.max(size.x, size.y, size.z) || 1;
+  const scale = 0.95 / maxDim;
+  root.scale.setScalar(scale);
+  root.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
+}
+```
+
+Pattern notes:
+- TWO distinct `THREE.Group()` instances — `saucer` and `cup`. Each
+  carries its own child meshes. Both attached to `root`.
+- `cup.position.y = saucerThick + 0.008;` places the cup ON the saucer,
+  not inside or floating above it.
+- `fitToUnitCube` is called ONCE on `root` after both subjects are
+  attached — that way the combined bounding box (saucer + cup) fills
+  the unit cube, instead of either subject alone.
+- For "X on Y" / "X with Y" / "X and Y" references, mirror this
+  pattern: model the larger / supporting subject first, then position
+  the smaller subject relative to it.
+
 ### Example 4 — Ceramic floral decals on a curved vase surface
 
 Reference summary:

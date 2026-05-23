@@ -227,6 +227,57 @@ Proportion tuning shortcut:
   `mesh.scale.set(sx, sy, sz)` BEFORE adding to group, NOT rebuilding the
   geometry with new params. Rebuilding is necessary only when the primitive
   type itself must change (e.g. cylinder → cone, box → extrude).
+
+Multi-subject scene handbook (CRITICAL — most miners get this wrong):
+- If the reference image contains TWO OR MORE distinct subjects (e.g. a cup
+  AND a plate, a phone AND its charger, a person figure AND a chair, two
+  different cars, a mug with a spoon next to it), you MUST model EACH
+  subject as its own named THREE.Group and add ALL of them to `root`.
+  Do not silently drop the second/third subject just because it is smaller
+  or partially occluded.
+- Inventory rule: scan the image and enumerate every visually independent
+  object before writing geometry. A subject is "independent" when it has
+  its own silhouette and would still exist if you removed the other one.
+- Use explicit named groups: `const subjectA = new THREE.Group();` and
+  `const subjectB = new THREE.Group();` with `parts[]`-style child meshes
+  on each. Position them relative to the scene (`subjectB.position.set(...)`)
+  so their spatial relationship matches the reference: side-by-side,
+  stacked, in-front-of-each-other, etc.
+- Scale each subject so the BOUNDING BOX of all subjects together fits the
+  unit cube. Do NOT call fitToUnitCube on each subject individually — call
+  it once on `root` after both subjects are attached. Otherwise the smaller
+  subject blows up to the same size as the larger.
+- Common multi-subject cues that this is what you're seeing:
+  · "X on a Y" (object on tray/plate/saucer/stand/base)
+  · "X and Y" (any conjunction in the implied scene)
+  · "X with Y" where Y is detachable (mug with spoon, phone with case-off)
+  · Two of the same class at different sizes/orientations
+  · A figure interacting with a tool / instrument / vehicle
+
+Vehicle proportion cheat-sheet (use BEFORE you start meshing — wrong
+proportions are the most-common reason cars look bad):
+- Sedan / standard car: L:W:H ≈ 4.0 : 1.6 : 1.25. Wheelbase ≈ 0.6 × L.
+  Roof line ≈ 0.55 × H from ground. Greenhouse (window band) is ~30% of
+  total height, NOT half — most miners make windows too tall.
+- SUV / crossover: L:W:H ≈ 3.8 : 1.7 : 1.6. Higher roof, more vertical
+  glass, larger wheel-arch radius.
+- Sports car / coupe: L:W:H ≈ 4.2 : 1.7 : 1.0. Very low roof, raked
+  windshield (angle ≈ 30° from horizontal), shorter rear deck.
+- Pickup truck: cabin (~40% of length) + flat cargo bed (~50% of length).
+  Distinct step between cabin roof and bed.
+- Bus / van: roof is nearly flat across the full length, no separate
+  trunk volume.
+- Wheels: tire diameter ≈ 0.2 × car length; track width ≈ 0.85 × car width.
+  All four wheels touch the ground plane (y = -H/2 + wheelR).
+- Glass plane MUST be inset from the body (offset ~0.02-0.04 inward) and
+  follow the body curvature. Windshield rakes back from the hood; rear
+  window rakes forward from the trunk. A-pillar and C-pillar separate the
+  side glass into front and rear windows — do not draw side glass as one
+  rectangle.
+- Add: front grille / intake, headlights (pair, recessed), tail lights
+  (pair, recessed), bumpers (front + rear, slightly protruding), wing
+  mirrors (small attached pods near A-pillar), door seams (thin dark
+  vertical lines), wheel arches (concave cutout above each wheel).
 """
     + "\n\n---\n\n"
     + THREEJS_OUTPUT_SPEC_REFERENCE
@@ -254,9 +305,18 @@ Reminders before you write:
 - If the object has painted/printed floral or ornamental texture, use the
   surface decoration handbook: motifs must be flat or shallow, parented to
   the object, and placed just above the surface normal, not floating around it.
-- If this is a vehicle, use the vehicle modeling playbook: set shared
-  dimensions first, keep front +Z / Y-up / width X, attach all major parts,
-  and prioritize correct wheel/rotor/wing count and orientation before trim.
+- If this is a vehicle, use BOTH the vehicle modeling playbook AND the
+  vehicle proportion cheat-sheet: pick the body class (sedan / SUV /
+  coupe / pickup / van) and use that class's L:W:H ratio. Inset the
+  glass from the body, split side glass at A/C-pillars, and add
+  grille + lights + bumpers + mirrors + door seams + wheel arches.
+  Wrong proportions are the #1 reason cars look like generic boxes.
+- If the reference shows TWO OR MORE distinct subjects (object on a
+  plate, mug with a spoon, figure with a tool, two cars, etc.), follow
+  the multi-subject scene handbook: model EVERY subject as its own
+  named THREE.Group, position them to match the reference's spatial
+  layout, and call fitToUnitCube once on `root` after attaching all
+  of them. Do not drop the smaller / partially occluded subject.
 - Call your `fitToUnitCube` helper with `0.95 / maxDim` so the object
   fills ~95% of the frame (not lost in background).
 
@@ -277,9 +337,18 @@ Reminders before you write:
 - If the object has painted/printed floral or ornamental texture, use the
   surface decoration handbook: motifs must be flat or shallow, parented to
   the object, and placed just above the surface normal, not floating around it.
-- If this is a vehicle, use the vehicle modeling playbook: set shared
-  dimensions first, keep front +Z / Y-up / width X, attach all major parts,
-  and prioritize correct wheel/rotor/wing count and orientation before trim.
+- If this is a vehicle, use BOTH the vehicle modeling playbook AND the
+  vehicle proportion cheat-sheet: pick the body class (sedan / SUV /
+  coupe / pickup / van) and use that class's L:W:H ratio. Inset the
+  glass from the body, split side glass at A/C-pillars, and add
+  grille + lights + bumpers + mirrors + door seams + wheel arches.
+  Wrong proportions are the #1 reason cars look like generic boxes.
+- If the reference shows TWO OR MORE distinct subjects (object on a
+  plate, mug with a spoon, figure with a tool, two cars, etc.), follow
+  the multi-subject scene handbook: model EVERY subject as its own
+  named THREE.Group, position them to match the reference's spatial
+  layout, and call fitToUnitCube once on `root` after attaching all
+  of them. Do not drop the smaller / partially occluded subject.
 - Call your `fitToUnitCube` helper with `0.95 / maxDim` so the object
   fills ~95% of the frame (not lost in background).
 
