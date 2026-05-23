@@ -184,42 +184,6 @@ class Orchestrator:
             logger.info(
                 f"{self._stg(1, entry_label)} Downloaded Task {task.stem} | MIME: {task.image_mime} | Bytes: {len(task.image_bytes)} | Elapsed: {time.time() - t_fetch:.2f}s"
             )
-
-            # Inject: Qwen-Image-Edit preprocessing (background removal). Returns the
-            # original bytes on any failure, so this is a no-op when CHUTES_API_KEY
-            # is absent or the API misbehaves.
-            try:
-                from modules.qwen_edit import edit as _qwen_edit
-                t_edit = time.time()
-                cleaned = await _qwen_edit(task.image_bytes)
-                if cleaned and cleaned is not task.image_bytes:
-                    task.image_bytes = cleaned
-                    task.image_mime = "image/png"
-                    logger.info(
-                        f"{self._stg(1, entry_label)} Qwen-Image-Edit Task {task.stem} | Bytes: {len(task.image_bytes)} | Elapsed: {time.time() - t_edit:.2f}s"
-                    )
-            except Exception as exc:
-                logger.warning(
-                    f"{self._stg(1, entry_label)} qwen_edit skipped: {type(exc).__name__}: {exc}"
-                )
-
-            # Inject: multi-view augmentation. Composes a 2x2 grid of front + 45/90/back
-            # rotations so the coder has 3D depth context. Falls back to the cleaned
-            # single view on any failure.
-            try:
-                from modules.multi_view import augment as _multi_view
-                t_mv = time.time()
-                grid = await _multi_view(task.image_bytes, seed=task.seed)
-                if grid and grid is not task.image_bytes:
-                    task.image_bytes = grid
-                    task.image_mime = "image/png"
-                    logger.info(
-                        f"{self._stg(1, entry_label)} Multi-view Task {task.stem} | Bytes: {len(task.image_bytes)} | Elapsed: {time.time() - t_mv:.2f}s"
-                    )
-            except Exception as exc:
-                logger.warning(
-                    f"{self._stg(1, entry_label)} multi_view skipped: {type(exc).__name__}: {exc}"
-                )
         except Exception as exc:
             await self._fail(task.stem, f"fetch: {type(exc).__name__}: {exc}", stage="fetch")
             return future
