@@ -2,7 +2,8 @@
 FROM pytorch/pytorch:2.8.0-cuda12.8-cudnn9-devel
 
 # Environment
-ENV DEBIAN_FRONTEND=noninteractive \
+ENV FLASHINFER_DISABLE_VERSION_CHECK=1 \
+    DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PIP_BREAK_SYSTEM_PACKAGES=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
