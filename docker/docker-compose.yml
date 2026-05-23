@@ -17,6 +17,9 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       - HF_HOME=/root/.cache/huggingface
       - OPENROUTER_API_KEY="placeholder"
+      - CHUTES_API_KEY=${CHUTES_API_KEY:-}
+      - QWEN_EDIT_ENABLED=${QWEN_EDIT_ENABLED:-1}
+      - MULTI_VIEW_ENABLED=${MULTI_VIEW_ENABLED:-0}
 
 volumes:
   huggingface-cache:

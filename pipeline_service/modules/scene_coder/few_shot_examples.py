@@ -632,6 +632,385 @@ These examples cover the most-failed patterns:
 
 When the reference image shows something else, follow the same composition
 discipline: single shared materials when uniform, explicit position lists
+for symmetric arrays, Vector2 for any 2D-points API, When the reference image shows something else, follow the same composition
+discipline: single shared materials when uniform, explicit position lists
 for symmetric arrays, Vector2 for any 2D-points API, fitToUnitCube before
 return.
+
+## Winning idioms from prior leader-replacing miners
+
+These five short modules each *beat* the previous round leader on a real prompt. Notice how each uses minimal primitives with explicit fitToUnitCube at the end. Borrow the material setups (metalness ≤ 0.6, transmission for glass, low roughness for polish) and the deterministic positioning patterns.
+
+### Winning idiom — glass bottle (transmission + ior + thickness) (from cluster-mason)
+```javascript
+export default function generate(THREE) {
+  const root = new THREE.Group();
+
+  // Material: Blue glass with proper transmission for transparency
+  const blue_glass_mat = new THREE.MeshPhysicalMaterial({
+    color: 0x29b6f6,
+    metalness: 0.0,
+    roughness: 0.05,
+    transmission: 0.95,
+    ior: 1.5,
+    transparent: true,
+    thickness: 3.0,
+    side: THREE.DoubleSide,
+  });
+
+  // Profile using SplineCurve for smooth curved shoulder transition
+  // Neck is now ~25% of total height (was ~10%)
+  const profileCurve = new THREE.SplineCurve([
+    new THREE.Vector2(0.00, 0.00),  // Center bottom
+    new THREE.Vector2(0.08, 0.02),  // Punt curve start
+    new THREE.Vector2(0.28, 0.05),  // Inner bottom edge
+    new THREE.Vector2(0.28, 0.55),  // Inner wall up (body height)
+    new THREE.Vector2(0.24, 0.65),  // Inner shoulder curve start
+    new THREE.Vector2(0.14, 0.72),  // Inner neck start
+    new THREE.Vector2(0.14, 0.92),  // Inner neck top (taller neck ~25% of height)
+    new THREE.Vector2(0.15, 0.92),  // Lip inner start
+    new THREE.Vector2(0.18, 0.94),  // Lip inner curve
+    new THREE.Vector2(0.22, 0.96),  // Lip top outer (thickened rounded rim)
+    new THREE.Vector2(0.22, 0.94),  // Lip outer curve down
+    new THREE.Vector2(0.16, 0.92),  // Neck outer top
+    new THREE.Vector2(0.16, 0.72),  // Neck outer side (taller)
+    new THREE.Vector2(0.24, 0.65),  // Outer shoulder curve (smooth transition)
+    new THREE.Vector2(0.32, 0.55),  // Body outer side
+    new THREE.Vector2(0.32, 0.05),  // Body outer bottom
+    new THREE.Vector2(0.08, 0.02),  // Outer base curve
+    new THREE.Vector2(0.00, 0.00),  // Close at center
+  ]);
+
+  const profile = profileCurve.getSpacedPoints(64);
+  const bottle_geom = new THREE.LatheGeometry(profile, 48);
+  const bottle = new THREE.Mesh(bottle_geom, blue_glass_mat);
+
+  root.add(bottle);
+
+  fitToUnitCube(THREE, root);
+  return root;
+}
+
+function fitToUnitCube(THREE, root) {
+  const box = new THREE.Box3().setFromObject(root);
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  box.getSize(size);
+  box.getCenter(center);
+  const maxDim = Math.max(size.x, size.y, size.z) || 1;
+  const scale = 0.95 / maxDim;
+  root.scale.setScalar(scale);
+  root.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
+}
+```
+
+### Winning idiom — wheeled / metallic object (from cluster-mason)
+```javascript
+export default function generate(THREE) {
+  const root = new THREE.Group();
+
+  // Materials
+  const metalMat = new THREE.MeshStandardMaterial({
+    color: 0x2a4a9c,
+    metalness: 0.6,
+    roughness: 0.2,
+  });
+
+  const gemMat = new THREE.MeshPhysicalMaterial({
+    color: 0x4488ff,
+    metalness: 0.0,
+    roughness: 0.05,
+    transmission: 0.95,
+    ior: 1.5,
+    transparent: true,
+  });
+
+  // 1. Band - slender ring shank (~10-15% of height), not thick donut
+  const bandGeom = new THREE.TorusGeometry(0.30, 0.05, 24, 64);
+  const band = new THREE.Mesh(bandGeom, metalMat);
+  band.rotation.x = Math.PI / 2;
+  root.add(band);
+
+  // 2. Bezel/Setting - substantial rounded setting that integrates with band shoulders
+  // Use lathe for smooth signet profile that rises from band
+  const bezelProfile = [
+    new THREE.Vector2(0.00, 0.00),
+    new THREE.Vector2(0.18, 0.00),
+    new THREE.Vector2(0.20, 0.04),
+    new THREE.Vector2(0.19, 0.08),
+    new THREE.Vector2(0.17, 0.10),
+    new THREE.Vector2(0.00, 0.10),
+  ];
+  const bezelGeom = new THREE.LatheGeometry(bezelProfile, 32);
+  const bezel = new THREE.Mesh(bezelGeom, metalMat);
+  bezel.rotation.x = Math.PI / 2;
+  bezel.position.set(0, 0.05, -0.30);
+  root.add(bezel);
+
+  // 3. Gemstone - large oval faceted gem, set INTO bezel (30% enclosed)
+  const stoneGeom = new THREE.IcosahedronGeometry(0.14, 2);
+  const stone = new THREE.Mesh(stoneGeom, gemMat);
+  stone.scale.set(1.3, 0.8, 1.1);
+  // Position so lower 30% is enclosed by bezel
+  stone.position.set(0, 0.12, -0.30);
+  stone.rotation.y = Math.PI / 6;
+  stone.rotation.z = Math.PI / 12;
+  stone.rotation.x = Math.PI / 8;
+  root.add(stone);
+
+  fitToUnitCube(THREE, root);
+  return root;
+}
+
+function fitToUnitCube(THREE, root) {
+  const box = new THREE.Box3().setFromObject(root);
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  box.getSize(size);
+  box.getCenter(center);
+  const maxDim = Math.max(size.x, size.y, size.z) || 1;
+  const scale = 0.95 / maxDim;
+  root.scale.setScalar(scale);
+  root.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
+}
+```
+
+### Winning idiom — matte ceramic / wood (from solid-mango)
+```javascript
+export default function generate(THREE) {
+  const root = new THREE.Group();
+
+  // Materials
+  const baseMat = new THREE.MeshStandardMaterial({
+    color: 0xe8dcc8,
+    metalness: 0.0,
+    roughness: 0.7,
+  });
+
+  const shadeMat = new THREE.MeshStandardMaterial({
+    color: 0xfff9f0,
+    metalness: 0.0,
+    roughness: 0.4,
+    emissive: 0xffeebb,
+    emissiveIntensity: 1.2,
+  });
+
+  const cordMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    metalness: 0.0,
+    roughness: 0.6,
+  });
+
+  // Base: Flat circular disc
+  const baseGeom = new THREE.CylinderGeometry(0.28, 0.28, 0.04, 32);
+  const base = new THREE.Mesh(baseGeom, baseMat);
+  base.position.y = 0.02;
+  root.add(base);
+
+  // Joint: Small connector cylinder
+  const jointGeom = new THREE.CylinderGeometry(0.06, 0.06, 0.03, 16);
+  const joint = new THREE.Mesh(jointGeom, baseMat);
+  joint.position.y = 0.055;
+  root.add(joint);
+
+  // Shade: Tall cylinder, tilted
+  const shadeHeight = 0.65;
+  const shadeRadius = 0.14;
+  const shadeGeom = new THREE.CylinderGeometry(shadeRadius, shadeRadius, shadeHeight, 32);
+  const shade = new THREE.Mesh(shadeGeom, shadeMat);
+  
+  // Position shade on top of joint, then tilt
+  // The pivot for tilt should be near the bottom of the shade
+  const shadePivot = new THREE.Group();
+  shadePivot.position.set(0, 0.07, 0);
+  
+  shade.position.y = shadeHeight / 2;
+  shadePivot.add(shade);
+  
+  // Tilt backwards slightly (around X axis)
+  shadePivot.rotation.x = -Math.PI / 9; // ~20 degrees
+  
+  root.add(shadePivot);
+
+  // Cord: Thin tube exiting from the back of the base
+  const cordPath = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(0, 0.02, -0.28), // Start at back edge of base
+    new THREE.Vector3(0, 0.01, -0.45), // Drop slightly
+    new THREE.Vector3(0.3, 0.0, -0.60), // Curve to the right and back
+    new THREE.Vector3(0.6, 0.0, -0.70), // Continue away
+  ]);
+  
+  const cordGeom = new THREE.TubeGeometry(cordPath, 20, 0.006, 8, false);
+  const cord = new THREE.Mesh(cordGeom, cordMat);
+  root.add(cord);
+
+  // Normalization helper
+  fitToUnitCube(THREE, root);
+  return root;
+}
+
+function fitToUnitCube(THREE, root) {
+  const box = new THREE.Box3().setFromObject(root);
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  box.getSize(size);
+  box.getCenter(center);
+  const maxDim = Math.max(size.x, size.y, size.z) || 1;
+  const scale = 0.95 / maxDim;
+  root.scale.setScalar(scale);
+  root.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
+}
+```
+
+### Winning idiom — polished marble / ceramic vase (from cautious-adventure)
+```javascript
+export default function generate(THREE) {
+  const root = new THREE.Group();
+
+  // Material: Polished white marble / ceramic
+  // Using standard material with low metalness and moderate roughness.
+  // Color is off-white to simulate stone.
+  const marbleMat = new THREE.MeshStandardMaterial({
+    color: 0xe8e8e8,
+    metalness: 0.0,
+    roughness: 0.35,
+  });
+
+  // --- Base ---
+  // Two-tiered cylindrical base.
+  // Bottom tier: slightly narrower, thicker.
+  const baseBottomGeom = new THREE.CylinderGeometry(0.24, 0.24, 0.06, 32);
+  const baseBottom = new THREE.Mesh(baseBottomGeom, marbleMat);
+  baseBottom.position.y = 0.03; // Half height
+  root.add(baseBottom);
+
+  // Top tier: wider, thinner disc.
+  const baseTopGeom = new THREE.CylinderGeometry(0.30, 0.30, 0.05, 32);
+  const baseTop = new THREE.Mesh(baseTopGeom, marbleMat);
+  baseTop.position.y = 0.06 + 0.025; // Bottom height + half top height
+  root.add(baseTop);
+
+  // --- Sculpture ---
+  // Twisted toroidal ring.
+  // Using TorusKnotGeometry with p=1, q=2 to create a double-twist loop.
+  // Radius: 0.24 (fits on base)
+  // Tube: 0.09 (thick, substantial volume)
+  // Segments: High count for smoothness.
+  const sculptureRadius = 0.24;
+  const sculptureTube = 0.09;
+  const sculptureGeom = new THREE.TorusKnotGeometry(
+    sculptureRadius,
+    sculptureTube,
+    128, // tubularSegments
+    32,  // radialSegments
+    1,   // p (winds around major axis)
+    2    // q (winds around minor axis - creates the twist)
+  );
+
+  const sculpture = new THREE.Mesh(sculptureGeom, marbleMat);
+  
+  // Position: Centered above the base.
+  // Base total height is 0.11.
+  // Sculpture bottom should touch base top.
+  // Sculpture center Y = Base Top Y + Sculpture Radius.
+  sculpture.position.y = 0.11 + sculptureRadius;
+  
+  // Orientation: TorusKnot lies in XY plane by default.
+  // We want it standing vertically (like a wheel), so rotate around X axis by 90 degrees.
+  sculpture.rotation.x = Math.PI / 2;
+  
+  root.add(sculpture);
+
+  fitToUnitCube(THREE, root);
+  return root;
+}
+
+function fitToUnitCube(THREE, root) {
+  const box = new THREE.Box3().setFromObject(root);
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  box.getSize(size);
+  box.getCenter(center);
+  const maxDim = Math.max(size.x, size.y, size.z) || 1;
+  const scale = 0.95 / maxDim;
+  root.scale.setScalar(scale);
+  root.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
+}
+```
+
+### Winning idiom — wax / candle composition (from cautious-adventure)
+```javascript
+export default function generate(THREE) {
+  const root = new THREE.Group();
+
+  // Materials
+  const waxMat = new THREE.MeshStandardMaterial({
+    color: 0x66b2e6,
+    metalness: 0.0,
+    roughness: 0.55,
+  });
+
+  const wickMat = new THREE.MeshStandardMaterial({
+    color: 0x2a4a7a,
+    metalness: 0.0,
+    roughness: 0.9,
+  });
+
+  const flameMat = new THREE.MeshPhysicalMaterial({
+    color: 0xffffff,
+    metalness: 0.0,
+    roughness: 0.1,
+    transmission: 0.85,
+    ior: 1.33,
+    transparent: true,
+    opacity: 0.9,
+    emissive: 0xffdd88,
+    emissiveIntensity: 1.5,
+  });
+
+  // Candle Body - light sky blue with subtle wax texture
+  const candleHeight = 0.8;
+  const candleRadius = 0.15;
+  const candleGeom = new THREE.CylinderGeometry(candleRadius, candleRadius, candleHeight, 32);
+  const candle = new THREE.Mesh(candleGeom, waxMat);
+  root.add(candle);
+
+  // Wick - dark blue to match candle body tone
+  const wickHeight = 0.04;
+  const wickRadius = 0.01;
+  const wickGeom = new THREE.CylinderGeometry(wickRadius, wickRadius, wickHeight, 8);
+  const wick = new THREE.Mesh(wickGeom, wickMat);
+  wick.position.y = candleHeight / 2 + wickHeight / 2;
+  root.add(wick);
+
+  // Flame - glowing translucent teardrop with smooth gradient
+  // Profile: bottom center -> base edge -> widest point -> tip (smooth curve)
+  const flameProfile = [
+    new THREE.Vector2(0.0, 0.0),
+    new THREE.Vector2(0.045, 0.0),
+    new THREE.Vector2(0.065, 0.12),
+    new THREE.Vector2(0.035, 0.22),
+    new THREE.Vector2(0.0, 0.28),
+  ];
+  const flameGeom = new THREE.LatheGeometry(flameProfile, 32);
+  const flame = new THREE.Mesh(flameGeom, flameMat);
+  flame.position.y = candleHeight / 2 + wickHeight;
+  root.add(flame);
+
+  fitToUnitCube(THREE, root);
+  return root;
+}
+
+function fitToUnitCube(THREE, root) {
+  const box = new THREE.Box3().setFromObject(root);
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  box.getSize(size);
+  box.getCenter(center);
+  const maxDim = Math.max(size.x, size.y, size.z) || 1;
+  const scale = 0.95 / maxDim;
+  root.scale.setScalar(scale);
+  root.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
+}
+```
 """

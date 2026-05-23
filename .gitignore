@@ -1,15 +1,6 @@
 __pycache__/
 *.pyc
-*.pyo
-.env
 .venv/
-node_modules
-node_modules/
 generated_outputs/
-*.egg-info/
-dist/
-build/
-.idea/
-.vscode/
-results.json
-results
+node_modules/
+*.log
