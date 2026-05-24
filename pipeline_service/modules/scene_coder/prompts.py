@@ -198,6 +198,118 @@ write inline.)
 | LED / emissive         | MeshStandardMaterial emissive=color emissiveIntensity 1.0 |
 | generic / unsure       | MeshStandardMaterial metalness 0.0 roughness 0.7 |
 
+# Attachment — concrete patterns (PROSE rules have not been enough; learn from code)
+
+The single biggest source of "looks broken" renders is parts floating
+in mid-air or intersecting the body. Use the following concrete code
+patterns. Memorize them — they trump abstract rules.
+
+### Pattern A: a small thing sits ON TOP of a slab body (button on calculator, marker on dial)
+
+```javascript
+const body = new THREE.Mesh(new THREE.BoxGeometry(bodyW, bodyH, bodyD), bodyMat);
+body.position.y = 0;                              // body centered at origin
+root.add(body);
+
+// Place child on the TOP face — overlap into the body slightly so no air gap shows:
+const childH = 0.04;
+const child = new THREE.Mesh(new THREE.BoxGeometry(0.1, childH, 0.1), childMat);
+child.position.y = (bodyH / 2) + (childH / 2) - 0.003;   // -0.003 = small sink for no-gap
+root.add(child);
+```
+
+### Pattern B: a ring / band wraps AROUND a body (gold band on a turquoise body, ring on a finger)
+
+```javascript
+const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.3, 0.4, 8, 16), bodyMat);
+body.rotation.z = Math.PI / 2;                    // lay capsule horizontal
+root.add(body);
+
+// Torus ring wrapping the body MUST share the body's axis and position:
+const ring = new THREE.Mesh(new THREE.TorusGeometry(0.31, 0.04, 16, 32), goldMat);
+ring.position.copy(body.position);                // same center
+ring.rotation.x = Math.PI / 2;                    // matches body's lying-down axis
+// torus major radius (0.31) = body radius (0.30) + tiny overlap (0.01) → grips the body
+root.add(ring);
+```
+
+### Pattern C: a loop / hinge / handle ATTACHES at a body edge (pocket-watch bow, mug handle)
+
+```javascript
+const caseRadius = 0.45;
+const caseDepth  = 0.12;
+const caseMesh = new THREE.Mesh(new THREE.LatheGeometry(caseProfile, 32), goldMat);
+root.add(caseMesh);
+
+// The bow stem RISES from the top edge of the case (12 o'clock direction).
+// Use a small overlap (30% of the stem length) so the joint reads as fused.
+const stemH = 0.08;
+const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, stemH, 16), goldMat);
+stem.position.y = caseRadius + stemH / 2 - 0.025;   // -0.025 = overlap of ~30% into case rim
+root.add(stem);
+
+// The bow ring (torus) sits ON TOP of the stem with another small overlap:
+const bowR = 0.10;
+const bow  = new THREE.Mesh(new THREE.TorusGeometry(bowR, 0.015, 16, 32), goldMat);
+bow.position.y = stem.position.y + stemH / 2 + bowR * 0.7;
+                                                   // bowR * 0.7 (not bowR * 1.0) so the
+                                                   // bottom of the torus dips into the stem top
+root.add(bow);
+```
+
+### Pattern D: a child WRAPS or CAPS the end of a body (lid on jar, cap on bottle, foot on table leg)
+
+```javascript
+const legH = 0.6;
+const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, legH, 16), woodMat);
+leg.position.y = legH / 2;
+root.add(leg);
+
+// Ball foot at the BOTTOM end of the leg — center at leg.bottom_y with the ball mostly below:
+const ballR = 0.05;
+const foot = new THREE.Mesh(new THREE.SphereGeometry(ballR, 16, 16), woodMat);
+foot.position.y = ballR * 0.4;                    // ballR * 0.4 so 60% of ball is below y=0
+                                                   // and 40% overlaps into the leg's bottom
+root.add(foot);
+```
+
+### Pattern E: contents INSIDE a transparent container (drink in glass, fruit in jar)
+
+```javascript
+const glassR = 0.25;
+const glassH = 0.6;
+// Open-top thin-walled cylinder shell:
+const shell = new THREE.Mesh(
+  new THREE.CylinderGeometry(glassR, glassR * 0.92, glassH, 48, 1, true), glassMat,
+);
+shell.position.y = glassH / 2;
+root.add(shell);
+
+// Liquid fills ~80% of the interior. Use slightly SMALLER radius so the liquid
+// doesn't z-fight or poke through the glass wall:
+const fill = 0.8;
+const liquidH = glassH * fill;
+const liquid = new THREE.Mesh(
+  new THREE.CylinderGeometry(glassR * 0.95, glassR * 0.92 * 0.95, liquidH, 48), liquidMat,
+);
+liquid.position.y = liquidH / 2 + 0.005;          // sit on the bottom of the inside
+root.add(liquid);
+
+// Floating piece (strawberry) inside the liquid volume — NOT on the glass surface:
+const berry = new THREE.Mesh(new THREE.SphereGeometry(0.04, 12, 12), berryMat);
+berry.position.set(
+  glassR * 0.4 * Math.cos(angle),                 // inside the cylinder, halfway out
+  liquid.position.y + liquidH * 0.2,              // mid-way through the liquid
+  glassR * 0.4 * Math.sin(angle),
+);
+root.add(berry);
+```
+
+The principle behind all five: **the child's position is computed from the
+parent's KNOWN dimensions** (`bodyH`, `caseRadius`, `legH`, `glassR`, etc.).
+Magic numbers like `0.35` or `0.25` chosen by guess always end up overlapping
+or floating. Name your dimensions and derive positions arithmetically.
+
 # Common pitfalls (each one of these has lost stems on this benchmark)
 
 - **Sharp BoxGeometry for a rounded product.** Calculators, phones,
