@@ -471,6 +471,10 @@ async def main():
     p.add_argument("--judge-url", required=True)
     p.add_argument("--judge-model", default="zai-org/GLM-4.6V-Flash")
     p.add_argument("--judge-key", default="local")
+    p.add_argument("--multi-view", action="store_true",
+                   help="generate 3 rotated views of the reference via Chutes "
+                   "Qwen-Image-Edit-2511, lay out as a 2x2 grid, and pass that "
+                   "to OURS coder so it sees the object from 4 angles.")
     args = p.parse_args()
 
     DEBUG_DIR.mkdir(parents=True, exist_ok=True)
@@ -555,6 +559,31 @@ async def main():
         inv_json = json.dumps(inv_clean, indent=2, ensure_ascii=False)
     ctx["inventory"] = {k: v for k, v in inventory.items() if k != "raw"}
 
+    # OPTIONAL: multi-view reference augmentation via Chutes Qwen-Image-Edit.
+    # Produces a 2x2 grid (original + 3 rotations) and substitutes it for
+    # the ref passed to OURS subprocess. Leader is unchanged. Falls back to
+    # the original ref on any failure so we never block on the edit API.
+    ours_ref_path = ref_path
+    multi_view_path = None
+    if args.multi_view:
+        try:
+            sys.path.insert(0, str(ROOT))
+            from multi_view import multi_view_grid
+            log.info("  multi-view: requesting 3 rotations via Chutes Qwen-Image-Edit...")
+            t_mv = time.time()
+            grid = await multi_view_grid(ref_bytes, seed=42, timeout=240.0)
+            log.info(f"  multi-view: {len(grid)} bytes in {time.time()-t_mv:.1f}s")
+            if grid and grid != ref_bytes:
+                mv_p = Path(f"/tmp/r8_refs/{stem}_mv.png")
+                mv_p.write_bytes(grid)
+                ours_ref_path = mv_p
+                multi_view_path = mv_p
+                # Save into stem_dir for the debug page
+                (stem_dir / "ref_multiview.png").write_bytes(grid)
+        except Exception as e:
+            log.warning(f"  multi-view failed: {type(e).__name__}: {e}")
+    ctx["multi_view_used"] = bool(multi_view_path)
+
     t0 = time.time()
     if args.leader_ref.startswith("winner"):
         # New mode: leader is one of the R8 audit candidates from the
@@ -564,7 +593,7 @@ async def main():
         leader_js, leader_meta = load_winner_js(stem, which=which)
         log.info(f"  leader=winner_pool {'loaded' if leader_js else 'MISSING'}")
         ours_js, ours_meta = await run_one_subprocess(
-            ours_wt, stem, ref_path, categories=cats,
+            ours_wt, stem, ours_ref_path, categories=cats,
             judge_url=args.judge_url, judge_model=args.judge_model,
             judge_key=args.judge_key, inventory_json=inv_json,
         )
