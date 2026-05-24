@@ -508,82 +508,92 @@ Key idioms:
   wheel), unlike the road wheels which use `rotation.z = Math.PI/2`.
 - `fitToUnitCube` is still mandatory even for large multi-part assemblies.
 
-### Example 3b — Multi-subject scene (coffee cup ON a saucer)
+### Example 3b — Multi-subject scene with BUILDER pattern (coffee cup ON a saucer)
 
 Reference summary:
 > A ceramic coffee cup sitting on top of a round flat saucer. TWO distinct
-> objects; the saucer extends past the cup base on all sides. Both must
-> appear in the render — most miners model only the cup and lose ~40% of
-> the visible silhouette.
+> objects; the saucer extends past the cup base on all sides. This is the
+> canonical "X on Y" multi-subject case — model each subject as its own
+> builder function, then COMPOSE them in `generate`.
 
-Pattern to reuse:
+Pattern to reuse (memorize this STRUCTURE — it generalizes to all
+multi-subject scenes; only the geometry inside each builder changes):
 
 ```javascript
-export default function generate(THREE) {
-  const root = new THREE.Group();
-
-  // --- materials (shared by both subjects) ---
-  const ceramicMat = new THREE.MeshStandardMaterial({
+// One small builder per inventoried subject. Self-contained groups,
+// own local coordinates, NEVER call fitToUnitCube here.
+function buildSaucer(THREE) {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({
     color: 0xf2efe6, metalness: 0.0, roughness: 0.4,
   });
-  const innerMat = new THREE.MeshStandardMaterial({
-    color: 0x3a2716, metalness: 0.0, roughness: 0.6,  // coffee
-  });
-
-  // --- subject A: saucer (modeled FIRST so the cup sits on top of it) ---
-  const saucer = new THREE.Group();
   const saucerR = 0.55;
-  const saucerThick = 0.04;
-  const saucerBase = new THREE.Mesh(
-    new THREE.CylinderGeometry(saucerR, saucerR * 0.92, saucerThick, 48),
-    ceramicMat,
+  const thick  = 0.04;
+  const base = new THREE.Mesh(
+    new THREE.CylinderGeometry(saucerR, saucerR * 0.92, thick, 48),
+    mat,
   );
-  saucerBase.position.y = saucerThick / 2;
-  saucer.add(saucerBase);
-  // Slight inner well so the cup foot has a place to rest:
-  const saucerWell = new THREE.Mesh(
+  base.position.y = thick / 2;
+  g.add(base);
+  // Slight inner well where the cup foot will rest:
+  const well = new THREE.Mesh(
     new THREE.CylinderGeometry(0.22, 0.22, 0.008, 32),
-    ceramicMat,
+    mat,
   );
-  saucerWell.position.y = saucerThick + 0.004;
-  saucer.add(saucerWell);
-  root.add(saucer);
+  well.position.y = thick + 0.004;
+  g.add(well);
+  g.userData.topY = thick + 0.008;  // explicit attachment surface
+  return g;
+}
 
-  // --- subject B: cup, positioned ABOVE the saucer well ---
-  const cup = new THREE.Group();
-  const cupR = 0.2;
-  const cupH = 0.32;
-  // Body: cylinder open at top
-  const cupBody = new THREE.Mesh(
-    new THREE.CylinderGeometry(cupR, cupR * 0.88, cupH, 48, 1, true),
-    ceramicMat,
+function buildCup(THREE) {
+  const g = new THREE.Group();
+  const ceramic = new THREE.MeshStandardMaterial({
+    color: 0xf2efe6, metalness: 0.0, roughness: 0.4,
+  });
+  const coffee = new THREE.MeshStandardMaterial({
+    color: 0x3a2716, metalness: 0.0, roughness: 0.6,
+  });
+  const r = 0.2;
+  const h = 0.32;
+  const body = new THREE.Mesh(
+    new THREE.CylinderGeometry(r, r * 0.88, h, 48, 1, true),
+    ceramic,
   );
-  cupBody.position.y = cupH / 2;
-  cup.add(cupBody);
-  // Solid bottom disk so it doesn't look hollow from below:
-  const cupBottom = new THREE.Mesh(
-    new THREE.CylinderGeometry(cupR * 0.88, cupR * 0.88, 0.01, 32),
-    ceramicMat,
+  body.position.y = h / 2;
+  g.add(body);
+  const bottom = new THREE.Mesh(
+    new THREE.CylinderGeometry(r * 0.88, r * 0.88, 0.01, 32),
+    ceramic,
   );
-  cupBottom.position.y = 0.005;
-  cup.add(cupBottom);
-  // Coffee surface (slightly recessed):
-  const coffee = new THREE.Mesh(
-    new THREE.CylinderGeometry(cupR * 0.96, cupR * 0.96, 0.005, 32),
-    innerMat,
+  bottom.position.y = 0.005;
+  g.add(bottom);
+  const surface = new THREE.Mesh(
+    new THREE.CylinderGeometry(r * 0.96, r * 0.96, 0.005, 32),
+    coffee,
   );
-  coffee.position.y = cupH - 0.02;
-  cup.add(coffee);
-  // Handle: torus arc on +X side
+  surface.position.y = h - 0.02;
+  g.add(surface);
+  // Handle (torus arc on +X side, opening toward viewer):
   const handle = new THREE.Mesh(
     new THREE.TorusGeometry(0.085, 0.02, 12, 32, Math.PI),
-    ceramicMat,
+    ceramic,
   );
-  handle.position.set(cupR + 0.02, cupH / 2, 0);
+  handle.position.set(r + 0.02, h / 2, 0);
   handle.rotation.y = Math.PI / 2;
-  cup.add(handle);
-  // Place cup ON TOP of saucer well (not floating):
-  cup.position.y = saucerThick + 0.008;
+  g.add(handle);
+  return g;
+}
+
+export default function generate(THREE) {
+  const root = new THREE.Group();
+  // inventory: saucer, cup (n = 2)
+  // layout: cup sits on top of the saucer's central well (X on Y)
+
+  const saucer = buildSaucer(THREE);
+  const cup    = buildCup(THREE);
+  cup.position.y = saucer.userData.topY;  // explicit attachment, no float
+  root.add(saucer);
   root.add(cup);
 
   fitToUnitCube(THREE, root);
@@ -604,16 +614,162 @@ function fitToUnitCube(THREE, root) {
 ```
 
 Pattern notes:
-- TWO distinct `THREE.Group()` instances — `saucer` and `cup`. Each
-  carries its own child meshes. Both attached to `root`.
-- `cup.position.y = saucerThick + 0.008;` places the cup ON the saucer,
-  not inside or floating above it.
-- `fitToUnitCube` is called ONCE on `root` after both subjects are
-  attached — that way the combined bounding box (saucer + cup) fills
-  the unit cube, instead of either subject alone.
-- For "X on Y" / "X with Y" / "X and Y" references, mirror this
-  pattern: model the larger / supporting subject first, then position
-  the smaller subject relative to it.
+- One builder function per inventoried subject (`buildSaucer`, `buildCup`).
+  Builders are independent, work in their own local coordinates, and
+  return finished Groups.
+- `generate` is just inventory comment + builder calls + positioning +
+  one `fitToUnitCube`. No mesh logic lives directly in `generate`.
+- Attachment via `saucer.userData.topY` exposed by the saucer builder.
+  No magic constants in `generate`; no air gap; no intersection.
+- This same structure scales: 5 subjects → 5 builders + 5 calls.
+  Repeated subjects (4 chair legs, 5 floating berries) call one builder
+  in a loop and set `.position.set(...)` per instance.
+
+### Example 3c — Container with internal contents via builder pattern (strawberry juice in tall glass)
+
+Reference summary:
+> A clear tall glass containing orange/yellow juice and several red
+> strawberry pieces floating inside. THREE inventoried subjects: glass
+> shell, liquid column, strawberries. The strawberries are visually
+> dominant — they MUST be modeled, not collapsed into "decoration".
+
+Pattern to reuse:
+
+```javascript
+function buildGlass(THREE) {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshPhysicalMaterial({
+    color: 0xffffff, metalness: 0.0, roughness: 0.05,
+    transmission: 0.95, ior: 1.5, transparent: true,
+  });
+  const rTop    = 0.18;
+  const rBottom = 0.16;
+  const h       = 0.62;
+  // Open-top thin-walled cylinder shell:
+  const shell = new THREE.Mesh(
+    new THREE.CylinderGeometry(rTop, rBottom, h, 48, 1, true),
+    mat,
+  );
+  shell.position.y = h / 2;
+  g.add(shell);
+  // Closed bottom disk so it doesn't read as a tube:
+  const bottom = new THREE.Mesh(
+    new THREE.CylinderGeometry(rBottom, rBottom, 0.01, 32),
+    mat,
+  );
+  bottom.position.y = 0.005;
+  g.add(bottom);
+  // Expose internal cavity dims so caller can place liquid + pieces inside:
+  g.userData.innerRTop    = rTop * 0.92;
+  g.userData.innerRBottom = rBottom * 0.92;
+  g.userData.innerH       = h - 0.02;
+  g.userData.innerCenterY = (h - 0.02) / 2 + 0.01;
+  return g;
+}
+
+function buildLiquid(THREE, innerRTop, innerRBottom, innerH, centerY, fillFrac = 0.78) {
+  const g = new THREE.Group();
+  const mat = new THREE.MeshStandardMaterial({
+    color: 0xf5a623,  // orange juice
+    metalness: 0.0, roughness: 0.25, transparent: true, opacity: 0.92,
+  });
+  const liqH = innerH * fillFrac;
+  const liq = new THREE.Mesh(
+    new THREE.CylinderGeometry(innerRTop * 0.99, innerRBottom * 0.99, liqH, 48),
+    mat,
+  );
+  // Sit liquid on the inner bottom, centered around glass interior:
+  liq.position.y = centerY - innerH / 2 + liqH / 2;
+  g.add(liq);
+  g.userData.surfaceY = liq.position.y + liqH / 2;
+  return g;
+}
+
+function buildStrawberry(THREE) {
+  const g = new THREE.Group();
+  const flesh = new THREE.MeshStandardMaterial({
+    color: 0xd83a3a, metalness: 0.0, roughness: 0.45,
+  });
+  // Cone-like body (wider at top, pointed at the bottom):
+  const body = new THREE.Mesh(
+    new THREE.ConeGeometry(0.025, 0.05, 16),
+    flesh,
+  );
+  body.rotation.z = Math.PI;  // point downward
+  body.position.y = 0;
+  g.add(body);
+  // Small green leafy crown on top (single thin disk):
+  const leaf = new THREE.Mesh(
+    new THREE.ConeGeometry(0.022, 0.012, 6),
+    new THREE.MeshStandardMaterial({ color: 0x4aa84a, roughness: 0.7 }),
+  );
+  leaf.position.y = 0.026;
+  g.add(leaf);
+  return g;
+}
+
+export default function generate(THREE) {
+  const root = new THREE.Group();
+  // inventory: glass, liquid, strawberry x5 (n = 7)
+  // layout: liquid fills ~80% of glass interior; strawberries float inside
+  //         the liquid at staggered heights
+
+  const glass = buildGlass(THREE);
+  const liquid = buildLiquid(
+    THREE,
+    glass.userData.innerRTop,
+    glass.userData.innerRBottom,
+    glass.userData.innerH,
+    glass.userData.innerCenterY,
+    0.78,
+  );
+  root.add(glass);
+  root.add(liquid);
+
+  // Five strawberries inside the liquid volume, deterministic placement:
+  const N = 5;
+  for (let i = 0; i < N; i++) {
+    const s = buildStrawberry(THREE);
+    const angle = (i / N) * Math.PI * 2;
+    const radius = glass.userData.innerRTop * 0.55;
+    s.position.set(
+      Math.cos(angle) * radius,
+      liquid.userData.surfaceY - 0.10 + (i % 2) * 0.06,  // staggered depth
+      Math.sin(angle) * radius,
+    );
+    s.rotation.y = angle;
+    root.add(s);
+  }
+
+  fitToUnitCube(THREE, root);
+  return root;
+}
+
+function fitToUnitCube(THREE, root) {
+  const box = new THREE.Box3().setFromObject(root);
+  const size = new THREE.Vector3();
+  const center = new THREE.Vector3();
+  box.getSize(size);
+  box.getCenter(center);
+  const maxDim = Math.max(size.x, size.y, size.z) || 1;
+  const scale = 0.95 / maxDim;
+  root.scale.setScalar(scale);
+  root.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
+}
+```
+
+Pattern notes:
+- Three builders, three subjects, one explicit inventory line.
+- The glass exposes interior dimensions via `userData` so the liquid
+  builder knows where to sit. The liquid exposes `surfaceY` so the
+  strawberry placement knows where the surface is.
+- Strawberries are placed via deterministic loop math (no `Math.random`)
+  using `i / N * 2 * π` to fan them around — the same trick used for
+  petals, spokes, repeated legs.
+- The strawberries are SOLID floating meshes inside the liquid volume,
+  NOT decoration dots on the glass surface. This is the most common
+  failure mode for "X containing Y" — the contained Y gets collapsed
+  into surface speckles.
 
 ### Example 4 — Ceramic floral decals on a curved vase surface
 

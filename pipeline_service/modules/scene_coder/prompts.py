@@ -132,11 +132,39 @@ the phrase — pick exact PBR params, don't improvise):
 
 Pre-modeling checklist (run through this BEFORE writing any geometry —
 this is the single biggest predictor of a correct render):
-1. INVENTORY · list every visually distinct element in the reference,
-   including contents inside transparent / open containers (liquid,
-   floating pieces, food in bowl, items in jar). Each one becomes a
-   named THREE.Group or named Mesh. Visually-dominant features are
-   never dropped, even if they're "inside" or "behind" something else.
+1. INVENTORY → DECOMPOSE → COMPOSE · this is the structural backbone
+   that prevents dropped subjects and unclear scenes.
+   (a) Inventory · list EVERY visually distinct subject in the reference,
+       including contents inside transparent or open containers (liquid,
+       floating pieces, food in bowl, items in jar). Typical count is
+       1-5 subjects.
+   (b) Decompose · write ONE small builder function per subject. Each
+       builder takes `THREE` and returns a `THREE.Group` containing
+       just that subject's meshes, in its own local coordinate system,
+       finished and self-contained:
+         function buildGlass(THREE)      { const g = new THREE.Group(); … return g; }
+         function buildStrawberry(THREE) { const g = new THREE.Group(); … return g; }
+       Inside each builder, focus on THAT subject only. Builders never
+       call `fitToUnitCube` themselves.
+   (c) Compose · in `generate(THREE)`, build the scene root, call each
+       builder, position the returned groups with `.position.set(...)`
+       (and `.rotation.set(...)` / `.scale.set(...)` if needed) to match
+       the reference's spatial layout (X on Y, X inside Y, X next to Y,
+       X repeated N times), then call `fitToUnitCube(root)` exactly ONCE
+       at the end. For repeated subjects (5 strawberries, 4 legs), loop
+       and clone — but use `builderFn(THREE)` fresh per instance OR
+       `mesh.clone(true)` if the builder result is purely geometric.
+   (d) Inventory comment · the very first executable line inside
+       `generate(THREE)` (after the `const root = new THREE.Group();`
+       line) MUST be a JS comment listing the inventory and layout, in
+       this exact format:
+         // inventory: <subject1>, <subject2>, …  (n = N)
+         // layout: <one short sentence describing how they relate>
+       This forces explicit recognition before code is written and lets
+       repair rounds verify nothing was silently dropped.
+   (e) Single-subject case · still use one builder function and the
+       inventory comment — the discipline carries over and makes
+       single-object code uniformly clean.
 2. SILHOUETTE · trace the outline from the implied view. Ask: is the
    rim/footprint a circle? If it's almond/vesica/leaf/oval/kidney/
    teardrop/canoe/banana-curve/crescent or any pinched asymmetric
@@ -353,11 +381,15 @@ Reminders before you write:
   visual critic will refer to parts by that name in later repair rounds.
 - Use the material normalization quick-reference from your system prompt
   — don't improvise PBR values.
-- Run the pre-modeling checklist from your system prompt: (1) inventory
-  every visible component including contents, (2) silhouette before
-  primitive, (3) color zones, (4) orientation toward +Z for faced
-  objects, (5) attachment / no float / no intersection hole, (6)
-  proportions first, (7) no symmetric-primitive default fallback.
+- Use the INVENTORY → DECOMPOSE → COMPOSE structure: one tiny
+  `buildXxx(THREE)` function per inventoried subject, each returning a
+  finished THREE.Group; `generate(THREE)` only composes them with
+  `.position.set(...)`. Start `generate` with the mandatory
+  `// inventory:` and `// layout:` comments.
+- Apply the rest of the pre-modeling checklist: silhouette before
+  primitive, color zones as separate materials, orientation toward
+  +Z for faced objects, attachment / no float / no intersection,
+  proportions before details, no symmetric-primitive default fallback.
 - Match the material normalization quick-reference, not improvised PBR.
 - Call your `fitToUnitCube` helper with `0.95 / maxDim` so the object
   fills ~95% of the frame (not lost in background).
@@ -373,11 +405,15 @@ Reminders before you write:
   part (lowercase, underscores) so the critic can target it later.
 - Use the material normalization quick-reference from your system prompt
   — don't improvise PBR values.
-- Run the pre-modeling checklist from your system prompt: (1) inventory
-  every visible component including contents, (2) silhouette before
-  primitive, (3) color zones, (4) orientation toward +Z for faced
-  objects, (5) attachment / no float / no intersection hole, (6)
-  proportions first, (7) no symmetric-primitive default fallback.
+- Use the INVENTORY → DECOMPOSE → COMPOSE structure: one tiny
+  `buildXxx(THREE)` function per inventoried subject, each returning a
+  finished THREE.Group; `generate(THREE)` only composes them with
+  `.position.set(...)`. Start `generate` with the mandatory
+  `// inventory:` and `// layout:` comments.
+- Apply the rest of the pre-modeling checklist: silhouette before
+  primitive, color zones as separate materials, orientation toward
+  +Z for faced objects, attachment / no float / no intersection,
+  proportions before details, no symmetric-primitive default fallback.
 - Match the material normalization quick-reference, not improvised PBR.
 - Call your `fitToUnitCube` helper with `0.95 / maxDim` so the object
   fills ~95% of the frame (not lost in background).
