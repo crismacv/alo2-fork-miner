@@ -239,6 +239,31 @@ Vehicle modeling playbook:
   silhouette, count, orientation, and attachment correct; then add trim,
   colors, logos, spokes, tread, and small hardware.
 
+Silhouette / rim-profile check (CRITICAL — most miners default to symmetric primitives even when the reference clearly shows an asymmetric shape):
+- BEFORE picking the primitive, examine the reference and ask: from
+  the implied top-down view, is the RIM (or footprint) a CIRCLE?
+  If not, do NOT use CylinderGeometry, SphereGeometry, TorusGeometry,
+  or any rotationally symmetric default.
+- Non-circular rim/footprint shapes (treat with explicit profile):
+  almond, vesica, leaf, eye, canoe, lens, ellipse, oval, kidney,
+  teardrop, sailboat, surfboard, pinched-at-one-or-both-ends,
+  crescent, banana-curve, S-curve, free-form irregular.
+- Recipes for those shapes:
+  · Sharp-pointed almond/vesica/canoe (pointed at both ends along
+    the long axis): build a 2D `THREE.Shape` using `moveTo` + two
+    `bezierCurveTo` calls (one for each long side), then
+    `THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: true })`
+    for the vessel body. Add a sunken interior with a slightly
+    smaller scaled copy if it's a hollow bowl.
+  · Smooth ellipse / oval rim: LatheGeometry for the height profile,
+    then `mesh.scale.set(sx, 1, sz)` with `sx ≠ sz` to elongate.
+  · Kidney/curved silhouette: SplineCurve in 2D Shape with control
+    points along the kidney outline, then ExtrudeGeometry.
+- A flat black/dark-glaze reference with no visible interior detail
+  is a STRONG hint that the silhouette IS the whole story — get the
+  outline RIGHT first, finishes second. A wrong silhouette + perfect
+  material still reads as the wrong object.
+
 Proportion tuning shortcut:
 - The fastest fix for a `wrong_proportion` issue is usually
   `mesh.scale.set(sx, sy, sz)` BEFORE adding to group, NOT rebuilding the
@@ -396,6 +421,13 @@ Reminders before you write:
   attach at the SEAT CORNERS and S-curve outward then inward. Do not
   let leg cylinders intersect each other or the seat slab — gives
   visible geometry holes.
+- Before writing geometry, ask: is the silhouette / rim a circle? If
+  the reference shows an almond / vesica / oval / kidney / leaf /
+  canoe / lens / teardrop / curved-asymmetric shape, follow the
+  Silhouette/rim-profile check — use ExtrudeGeometry with a custom
+  2D Shape (bezierCurveTo for smooth pinched points) or scale a
+  LatheGeometry non-uniformly. Default cylinders/spheres on
+  non-circular references is the #1 cause of "wrong object" verdicts.
 - Call your `fitToUnitCube` helper with `0.95 / maxDim` so the object
   fills ~95% of the frame (not lost in background).
 
@@ -442,6 +474,13 @@ Reminders before you write:
   attach at the SEAT CORNERS and S-curve outward then inward. Do not
   let leg cylinders intersect each other or the seat slab — gives
   visible geometry holes.
+- Before writing geometry, ask: is the silhouette / rim a circle? If
+  the reference shows an almond / vesica / oval / kidney / leaf /
+  canoe / lens / teardrop / curved-asymmetric shape, follow the
+  Silhouette/rim-profile check — use ExtrudeGeometry with a custom
+  2D Shape (bezierCurveTo for smooth pinched points) or scale a
+  LatheGeometry non-uniformly. Default cylinders/spheres on
+  non-circular references is the #1 cause of "wrong object" verdicts.
 - Call your `fitToUnitCube` helper with `0.95 / maxDim` so the object
   fills ~95% of the frame (not lost in background).
 
