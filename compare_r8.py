@@ -119,6 +119,7 @@ log = logging.getLogger("gen_one")
 
 from llm.session_store import SessionStore
 from modules.scene_coder.agent import SceneCoderAgent
+from modules.scene_coder import prompts as _prompts
 from modules.critic.agent import CriticAgent
 from openai import AsyncOpenAI
 import render as render_mod
@@ -138,11 +139,27 @@ async def main():
     p.add_argument("--ref", required=True)
     p.add_argument("--out-js", required=True)
     p.add_argument("--out-meta", required=True)
+    p.add_argument("--categories", default="",
+                   help="comma-separated category tags from classification; if set, "
+                   "the system prompt is pruned to the matching handbooks/few-shot.")
     args = p.parse_args()
 
     img = Path(args.ref).read_bytes()
     client = AsyncOpenAI(base_url=OR_BASE, api_key=OR_KEY, timeout=240)
     store = SessionStore()
+    # Optional system-prompt pruning by category. Monkey-patch the module's
+    # CODER_SYSTEM_PROMPT before constructing the agent so the agent picks
+    # up the leaner prompt.
+    if args.categories.strip():
+        cats = [c.strip() for c in args.categories.split(",") if c.strip()]
+        pruned = _prompts.build_system_prompt(cats)
+        _prompts.CODER_SYSTEM_PROMPT = pruned
+        # SceneCoderAgent imported its own bound copy at module load time;
+        # rebind there too.
+        from modules.scene_coder import agent as _agent_mod
+        _agent_mod.CODER_SYSTEM_PROMPT = pruned
+        log.info(f"  prompt pruned for categories {cats}: {len(pruned)} chars "
+                 f"(full would be {len(_prompts.build_system_prompt(None))} chars)")
     coder = SceneCoderAgent(client=client, model=MODEL, session_store=store,
                             temperature=0.0, seed=42, max_tokens=8192,
                             backend="vllm", total_stages=6)
@@ -241,13 +258,19 @@ def ensure_worktree(commit_ref: str) -> Path:
     return wt
 
 
-async def run_one_subprocess(work_dir: Path, stem: str, ref_path: Path) -> tuple[str | None, dict]:
+async def run_one_subprocess(work_dir: Path, stem: str, ref_path: Path,
+                              categories: list[str] | None = None) -> tuple[str | None, dict]:
     out_js = Path(f"/tmp/gen_{work_dir.name}_{stem}.js")
     out_meta = Path(f"/tmp/gen_{work_dir.name}_{stem}.json")
-    proc = await asyncio.create_subprocess_exec(
+    cmd = [
         sys.executable, str(work_dir / "_gen_one.py"),
         "--stem", stem, "--ref", str(ref_path),
         "--out-js", str(out_js), "--out-meta", str(out_meta),
+    ]
+    if categories:
+        cmd += ["--categories", ",".join(categories)]
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
         cwd=str(work_dir),
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
     )
@@ -362,6 +385,129 @@ def append_run_row(row: dict) -> None:
 DASH_HTML_PATH = DASH_DIR / "r9_compare.html"
 
 
+DASHBOARD_CSS = """
+:root {
+  --bg:#0d0d10; --panel:#17171b; --panel2:#1d1d22; --border:#2a2a32;
+  --fg:#e4e4ea; --muted:#8a8a92; --accent:#5cd3a5; --danger:#ff7676; --warn:#f5c25b;
+}
+* { box-sizing:border-box }
+body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+       margin:0; background:var(--bg); color:var(--fg); font-size:13px; }
+header { padding:10px 18px; background:var(--panel); border-bottom:1px solid var(--border);
+         position:sticky; top:0; z-index:50; }
+h1 { margin:0 0 4px; font-size:14px; font-weight:600; letter-spacing:.02em; }
+.tally-row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; font-size:11px; }
+.tally { display:inline-flex; gap:8px; padding:4px 10px; border-radius:5px;
+         background:var(--panel2); border:1px solid var(--border);
+         font-variant-numeric:tabular-nums; }
+.tally.big { font-size:13px; padding:6px 14px; }
+.tally .w { color:var(--accent); font-weight:600; }
+.tally .l { color:var(--danger); font-weight:600; }
+.tally .d { color:var(--warn); font-weight:600; }
+.tally .label { color:var(--muted); font-size:10px; padding-right:5px;
+                border-right:1px solid var(--border); margin-right:2px;
+                text-transform:uppercase; letter-spacing:.05em; }
+.tally .ref { color:var(--muted); font-family:monospace; font-size:10px; }
+.meta { color:var(--muted); font-size:11px; }
+
+main { padding:12px 16px; display:flex; flex-direction:column; gap:10px; }
+
+.duel { background:var(--panel); border:1px solid var(--border); border-radius:7px;
+        overflow:hidden; }
+.duel-top { display:grid; grid-template-columns:200px 200px 200px 1fr; gap:1px;
+            background:var(--border); }
+.tile { background:var(--panel2); padding:6px; position:relative; }
+.tile h3 { margin:0 0 4px; font-size:9px; color:var(--muted); font-weight:500;
+           letter-spacing:.05em; text-transform:uppercase;
+           display:flex; justify-content:space-between; align-items:center; gap:6px; }
+.tile h3 .num { color:var(--fg); font-family:monospace; font-weight:600; font-size:10px; }
+.tile img.main { width:100%; aspect-ratio:1/1; object-fit:cover; display:block;
+                 background:#222; border-radius:3px; }
+.tile .info { font-size:10px; color:var(--muted); margin-top:4px;
+              display:flex; justify-content:space-between; }
+.tile .controls { position:absolute; top:6px; right:8px; display:flex; gap:4px; }
+.btn3d { background:rgba(0,0,0,.6); color:var(--fg); border:1px solid rgba(255,255,255,.15);
+         padding:2px 6px; font-size:9px; border-radius:3px; cursor:pointer;
+         letter-spacing:.05em; text-transform:uppercase; }
+.btn3d:hover { background:var(--accent); color:#000; }
+
+.summary-tile { background:var(--panel2); padding:8px 10px; display:flex;
+                flex-direction:column; gap:6px; }
+.summary-tile .stem { color:var(--muted); font-size:9px; font-family:monospace;
+                      word-break:break-all; line-height:1.3; }
+.summary-tile .verdict { font-size:12px; font-weight:600; padding:3px 8px;
+                         border-radius:4px; display:inline-block; align-self:flex-start;
+                         text-transform:uppercase; letter-spacing:.04em; }
+.summary-tile .verdict.win { background:rgba(92,211,165,.15); color:var(--accent);
+                              border:1px solid rgba(92,211,165,.4); }
+.summary-tile .verdict.loss { background:rgba(255,118,118,.12); color:var(--danger);
+                              border:1px solid rgba(255,118,118,.35); }
+.summary-tile .verdict.draw { background:rgba(245,194,91,.12); color:var(--warn);
+                              border:1px solid rgba(245,194,91,.35); }
+.summary-tile .verdict.fail { background:rgba(120,120,128,.18); color:var(--muted);
+                              border:1px solid var(--border); }
+.summary-tile .row2 { display:flex; flex-direction:column; gap:3px; font-size:10px;
+                      color:var(--muted); }
+.summary-tile .row2 span { background:var(--panel); padding:2px 6px; border-radius:3px;
+                           border:1px solid var(--border); font-family:monospace; }
+.summary-tile .config { font-size:9px; color:var(--muted); font-family:monospace;
+                        letter-spacing:.02em; }
+
+.strips { padding:6px; background:var(--panel); display:none; border-top:1px solid var(--border); }
+.strips.open { display:block; }
+.strip { display:grid; grid-template-columns:repeat(8,1fr); gap:3px;
+         padding:4px; margin-top:4px; border:1px solid var(--border); border-radius:4px;
+         background:var(--panel2); }
+.strip:first-child { margin-top:0; }
+.strip-label { font-size:9px; color:var(--muted); padding:4px 4px 2px;
+               text-transform:uppercase; letter-spacing:.05em; }
+.strip img { width:100%; aspect-ratio:1/1; object-fit:cover; background:#222;
+             border-radius:2px; display:block; }
+.strip .missing { width:100%; aspect-ratio:1/1; background:#1a1a1f;
+                  border:1px dashed var(--border); border-radius:2px;
+                  display:flex; align-items:center; justify-content:center;
+                  color:var(--muted); font-size:9px; }
+.toggle-strips { width:100%; background:var(--panel); color:var(--muted);
+                 border:none; border-top:1px solid var(--border); padding:4px;
+                 font-size:10px; cursor:pointer; letter-spacing:.05em;
+                 text-transform:uppercase; }
+.toggle-strips:hover { color:var(--fg); background:var(--panel2); }
+
+/* modal */
+#modal { position:fixed; inset:0; background:rgba(0,0,0,.85); display:none;
+         z-index:100; padding:30px; }
+#modal.open { display:flex; flex-direction:column; }
+#modal iframe { flex:1; border:1px solid var(--border); border-radius:6px;
+                background:#202024; }
+#modal .close { position:absolute; top:14px; right:14px; background:var(--panel);
+                color:var(--fg); border:1px solid var(--border); padding:6px 12px;
+                border-radius:4px; cursor:pointer; }
+#modal .title { color:var(--muted); font-size:12px; margin-bottom:8px;
+                font-family:monospace; }
+"""
+
+DASHBOARD_JS = """
+function open3d(src, title) {
+  const m = document.getElementById('modal');
+  const t = document.getElementById('modalTitle');
+  const f = document.getElementById('modalFrame');
+  t.textContent = title;
+  f.src = 'viewer.html?src=' + encodeURIComponent(src);
+  m.classList.add('open');
+}
+function close3d() {
+  const m = document.getElementById('modal');
+  const f = document.getElementById('modalFrame');
+  m.classList.remove('open');
+  f.src = '';
+}
+function toggleStrips(id) {
+  document.getElementById(id).classList.toggle('open');
+}
+window.addEventListener('keydown', e => { if (e.key === 'Escape') close3d(); });
+"""
+
+
 def write_dashboard():
     rows = []
     if RUNS_LOG.exists():
@@ -398,79 +544,13 @@ def write_dashboard():
 
     parts = [f"""<!doctype html>
 <meta charset=utf-8>
-<title>Duel R{ROUND_N} · cumulative</title>
-<style>
-:root {{
-  --bg:#0d0d10; --panel:#17171b; --panel2:#1d1d22; --border:#2a2a32;
-  --fg:#e4e4ea; --muted:#8a8a92; --accent:#5cd3a5; --danger:#ff7676; --warn:#f5c25b;
-}}
-* {{ box-sizing:border-box }}
-body {{ font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-       margin:0; background:var(--bg); color:var(--fg); }}
-header {{ padding:14px 24px; background:var(--panel); border-bottom:1px solid var(--border); }}
-h1 {{ margin:0 0 6px; font-size:16px; font-weight:600; letter-spacing:.02em; }}
-.tally-row {{ display:flex; gap:16px; align-items:center; flex-wrap:wrap; font-size:13px; }}
-.tally {{ display:inline-flex; gap:10px; padding:6px 14px; border-radius:6px;
-          background:var(--panel2); border:1px solid var(--border);
-          font-variant-numeric:tabular-nums; }}
-.tally.big {{ font-size:15px; padding:8px 18px; }}
-.tally .w {{ color:var(--accent); font-weight:600; }}
-.tally .l {{ color:var(--danger); font-weight:600; }}
-.tally .d {{ color:var(--warn); font-weight:600; }}
-.tally .label {{ color:var(--muted); font-size:11px; padding-right:6px;
-                 border-right:1px solid var(--border); margin-right:4px; }}
-.meta {{ color:var(--muted); font-size:12px; }}
-
-main {{ padding:18px 24px; display:flex; flex-direction:column; gap:18px; }}
-.duel {{ background:var(--panel); border:1px solid var(--border); border-radius:8px;
-        padding:16px; }}
-.duel-head {{ display:flex; justify-content:space-between; align-items:center;
-              margin-bottom:12px; gap:12px; flex-wrap:wrap; }}
-.duel-head .stem {{ color:var(--muted); font-size:11px; font-family:monospace; }}
-.duel-head .ts {{ color:var(--muted); font-size:11px; }}
-.badges {{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }}
-.badge {{ padding:3px 10px; border-radius:4px; font-size:11px; font-weight:600;
-         text-transform:uppercase; letter-spacing:.04em; }}
-.badge.win {{ background:rgba(92,211,165,.15); color:var(--accent); border:1px solid rgba(92,211,165,.4); }}
-.badge.loss {{ background:rgba(255,118,118,.12); color:var(--danger); border:1px solid rgba(255,118,118,.35); }}
-.badge.draw {{ background:rgba(245,194,91,.12); color:var(--warn); border:1px solid rgba(245,194,91,.35); }}
-.badge.fail {{ background:rgba(120,120,128,.18); color:var(--muted); border:1px solid var(--border); }}
-
-.three-col {{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px; margin-bottom:12px; }}
-.col {{ background:var(--panel2); border:1px solid var(--border); border-radius:6px;
-       overflow:hidden; }}
-.col .label2 {{ padding:8px 10px; font-size:11px; color:var(--muted);
-              border-bottom:1px solid var(--border); display:flex;
-              justify-content:space-between; gap:6px;
-              text-transform:uppercase; letter-spacing:.05em; }}
-.col .label2 .num {{ font-family:monospace; color:var(--fg); font-weight:600; }}
-.col img.main {{ width:100%; aspect-ratio:1/1; object-fit:cover; display:block; background:#222; }}
-
-.strip {{ display:grid; grid-template-columns:repeat(8, 1fr); gap:4px;
-         background:var(--panel2); padding:6px; border:1px solid var(--border);
-         border-radius:6px; margin-bottom:6px; }}
-.strip-label {{ font-size:10px; color:var(--muted); padding:6px 0 4px 2px;
-                text-transform:uppercase; letter-spacing:.05em;
-                display:flex; gap:8px; align-items:center; }}
-.strip img {{ width:100%; aspect-ratio:1/1; object-fit:cover; background:#222;
-             border-radius:3px; display:block; }}
-.strip .missing {{ width:100%; aspect-ratio:1/1; background:#1a1a1f;
-                  border:1px dashed var(--border); border-radius:3px;
-                  display:flex; align-items:center; justify-content:center;
-                  color:var(--muted); font-size:10px; }}
-
-.votes {{ display:flex; gap:8px; font-size:11px; color:var(--muted); flex-wrap:wrap; }}
-.votes span {{ background:var(--panel2); padding:3px 8px; border-radius:3px;
-              border:1px solid var(--border); font-family:monospace; }}
-.config-tag {{ background:var(--panel2); padding:3px 8px; border-radius:3px;
-              border:1px solid var(--border); font-size:10px; color:var(--muted);
-              font-family:monospace; }}
-</style>
+<title>Duel R{ROUND_N}</title>
+<style>{DASHBOARD_CSS}</style>
 <header>
-  <h1>Duel · R{ROUND_N} · cumulative across all runs</h1>
+  <h1>Duel · R{ROUND_N} · cumulative</h1>
   <div class=tally-row>
     <div class="tally big">
-      <span class=label>OVERALL ({overall_total})</span>
+      <span class=label>Overall (n={overall_total})</span>
       <span class=w>{overall_w}W</span><span class=d>{overall_d}D</span><span class=l>{overall_l}L</span>
       <span style="color:var(--muted)">· fail {overall_f}</span>
       <span style="color:var(--muted)">· net {overall_w - overall_l:+d}</span>
@@ -481,7 +561,7 @@ main {{ padding:18px 24px; display:flex; flex-direction:column; gap:18px; }}
         total = g["w"] + g["d"] + g["l"]
         parts.append(f"""    <div class=tally>
       <span class=label>{label or '—'}</span>
-      <span class=meta>{lref[:7]} vs {oref[:7]}</span>
+      <span class=ref>{lref[:7]} vs {oref[:7]}</span>
       <span class=w>{g['w']}W</span><span class=d>{g['d']}D</span><span class=l>{g['l']}L</span>
       <span style="color:var(--muted)">·n={total} ·net {g['w'] - g['l']:+d}</span>
     </div>
@@ -492,34 +572,25 @@ main {{ padding:18px 24px; display:flex; flex-direction:column; gap:18px; }}
 <main>
 """)
 
-    verdict_badges = {
-        "OURS_WIN": ('<span class="badge loss">LEADER LOSES</span>',
-                     '<span class="badge win">OURS WINS</span>'),
-        "LEADER_WIN": ('<span class="badge win">LEADER WINS</span>',
-                       '<span class="badge loss">OURS LOSES</span>'),
-        "DRAW": ('<span class="badge draw">DRAW</span>',
-                 '<span class="badge draw">DRAW</span>'),
-        "JUDGE_FAIL": ('<span class="badge fail">FAIL</span>',
-                       '<span class="badge fail">FAIL</span>'),
-    }
-
     def strip_html(rel_paths: list[str | None] | None) -> str:
         if not rel_paths:
-            return '<div class="strip">' + ''.join(
-                '<div class="missing">—</div>' for _ in range(8)) + '</div>'
+            return ''.join('<div class="missing">—</div>' for _ in range(8))
         tiles = []
         for rp in rel_paths[:8]:
             if rp:
                 tiles.append(f'<img src="{rp}">')
             else:
                 tiles.append('<div class="missing">×</div>')
-        return '<div class="strip">' + ''.join(tiles) + '</div>'
+        return ''.join(tiles)
 
-    for r in rows:
+    for idx, r in enumerate(rows):
         v = r.get("judge", {}).get("verdict", "JUDGE_FAIL")
-        leader_badge, ours_badge = verdict_badges.get(v, ("", ""))
+        verdict_cls = {'OURS_WIN': 'win', 'LEADER_WIN': 'loss',
+                       'DRAW': 'draw', 'JUDGE_FAIL': 'fail'}[v]
+        verdict_label = {'OURS_WIN': 'Ours wins', 'LEADER_WIN': 'Leader wins',
+                         'DRAW': 'Draw', 'JUDGE_FAIL': 'Judge fail'}[v]
 
-        votes_html = ""
+        votes_html = ''
         for i, vote in enumerate(r.get("judge", {}).get("votes", [])):
             if vote is None:
                 votes_html += f'<span style="color:var(--danger)">v{i+1}: fail</span>'
@@ -531,46 +602,74 @@ main {{ padding:18px 24px; display:flex; flex-direction:column; gap:18px; }}
         ls = f"{lm['best_score']:.2f}" if isinstance(lm.get('best_score'), (int, float)) else "—"
         os_ = f"{om['best_score']:.2f}" if isinstance(om.get('best_score'), (int, float)) else "—"
 
-        ts_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(r.get('ts', 0)))
+        ts_str = time.strftime('%H:%M:%S', time.localtime(r.get('ts', 0)))
         lref_short = r.get('leader_ref', '?')[:7]
         oref_short = r.get('ours_ref', '?')[:7]
         label = r.get('label', '')
 
+        # 3D-viewer src paths: assets/<stem>__<run>/leader.js etc.
+        # Derive from leader_main path: assets/X/leader_main.png → assets/X/leader.js
+        leader_main = r.get('leader_main') or ''
+        ours_main = r.get('ours_main') or ''
+        leader_js_src = leader_main.rsplit('/', 1)[0] + '/leader.js' if leader_main else ''
+        ours_js_src = ours_main.rsplit('/', 1)[0] + '/ours.js' if ours_main else ''
+
+        cls = r.get('classification') or {}
+        cls_info = f"{cls.get('subject','')} · {cls.get('category','?')}" if cls.get('subject') else ''
+
+        strips_id = f"strips-{idx}"
+        stem_short = r['stem'][:10]
+        leader_btn = (f'<button class=btn3d onclick="open3d(&quot;{leader_js_src}&quot;,'
+                      f'&quot;leader · {stem_short}&quot;)">3D</button>') if leader_js_src else ''
+        ours_btn = (f'<button class=btn3d onclick="open3d(&quot;{ours_js_src}&quot;,'
+                    f'&quot;ours · {stem_short}&quot;)">3D</button>') if ours_js_src else ''
+        leader_penalty = r.get('judge', {}).get('leader', '—')
+        ours_penalty = r.get('judge', {}).get('ours', '—')
+
         parts.append(f"""
 <div class=duel>
-  <div class=duel-head>
-    <div>
-      <div class=stem>{r['stem']}</div>
-      <div class=ts>{ts_str}</div>
-    </div>
-    <div class=badges>
-      <span class=config-tag>{label or 'unlabeled'} · {lref_short} → {oref_short}</span>
-      <div class=votes>{votes_html}</div>
-      <span class="badge {'win' if v == 'OURS_WIN' else 'loss' if v == 'LEADER_WIN' else 'draw' if v == 'DRAW' else 'fail'}">{v.replace('_',' ')}</span>
-    </div>
-  </div>
-  <div class=three-col>
-    <div class=col>
-      <div class=label2><span>PROMPT</span><span class=num>reference</span></div>
+  <div class=duel-top>
+    <div class=tile>
+      <h3><span>Reference</span><span class=num>{ts_str}</span></h3>
       <img class=main src="{r.get('ref') or ''}">
+      <div class=info><span>{cls_info}</span></div>
     </div>
-    <div class=col>
-      <div class=label2><span>LEADER · {lref_short}</span><span class=num>critic {ls} · penalty {r.get('judge',{}).get('leader','—')}</span></div>
-      <img class=main src="{r.get('leader_main') or ''}">
+    <div class=tile>
+      <h3><span>Leader · {lref_short}</span><span class=num>L={leader_penalty}</span></h3>
+      <img class=main src="{leader_main}">
+      <div class=controls>{leader_btn}</div>
+      <div class=info><span>critic {ls}</span><span>{lm.get('dt', 0):.0f}s</span></div>
     </div>
-    <div class=col>
-      <div class=label2><span>OURS · {oref_short}{(' · '+label) if label else ''}</span><span class=num>critic {os_} · penalty {r.get('judge',{}).get('ours','—')}</span></div>
-      <img class=main src="{r.get('ours_main') or ''}">
+    <div class=tile>
+      <h3><span>Ours · {oref_short}</span><span class=num>O={ours_penalty}</span></h3>
+      <img class=main src="{ours_main}">
+      <div class=controls>{ours_btn}</div>
+      <div class=info><span>critic {os_}</span><span>{om.get('dt', 0):.0f}s</span></div>
+    </div>
+    <div class="tile summary-tile">
+      <span class="verdict {verdict_cls}">{verdict_label}</span>
+      <div class=config>{label or 'unlabeled'} · {lref_short} → {oref_short}</div>
+      <div class=row2>{votes_html}</div>
+      <div class=stem>{r['stem']}</div>
     </div>
   </div>
-  <div class=strip-label>LEADER · 8-view sweep {leader_badge}</div>
-  {strip_html(r.get('leader_views'))}
-  <div class=strip-label>OURS · 8-view sweep {ours_badge}</div>
-  {strip_html(r.get('ours_views'))}
-</div>
-""")
+  <button class=toggle-strips onclick="toggleStrips('{strips_id}')">8-view sweep ▾</button>
+  <div class=strips id="{strips_id}">
+    <div class=strip-label>Leader</div>
+    <div class=strip>{strip_html(r.get('leader_views'))}</div>
+    <div class=strip-label>Ours</div>
+    <div class=strip>{strip_html(r.get('ours_views'))}</div>
+  </div>
+</div>""")
 
-    parts.append("</main>")
+    parts.append("""</main>
+<div id="modal">
+  <button class=close onclick="close3d()">close ✕  (Esc)</button>
+  <div class=title id="modalTitle"></div>
+  <iframe id="modalFrame"></iframe>
+</div>
+<script>""" + DASHBOARD_JS + "</script>")
+
     DASH_HTML_PATH.write_text("\n".join(parts))
     log.info(f"dashboard → {DASH_HTML_PATH}  ({len(rows)} rows total, {DASH_HTML_PATH.stat().st_size//1024} KB)")
 
@@ -652,6 +751,11 @@ async def main():
         ours_main_rel = save_asset(ours_main_b, stem_dir / "ours_main.png")
         leader_views_rel = [save_asset(v, stem_dir / f"leader_v{i}.png") for i, v in enumerate(leader_views_b or [])]
         ours_views_rel = [save_asset(v, stem_dir / f"ours_v{i}.png") for i, v in enumerate(ours_views_b or [])]
+        # Save .js sources so the dashboard's 3D viewer can import them.
+        if leader_js:
+            (stem_dir / "leader.js").write_text(leader_js)
+        if ours_js:
+            (stem_dir / "ours.js").write_text(ours_js)
 
         row = {
             "run_id": run_id, "ts": int(time.time()), "stem": stem,

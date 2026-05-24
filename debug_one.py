@@ -441,10 +441,24 @@ async def main():
     ours_wt = ensure_worktree(args.ours_ref)
     ref_path = Path("/tmp/r8_refs") / f"{stem}.png"
 
+    # Derive categories from classification → coder gets a pruned system
+    # prompt with only the relevant handbooks + few-shot.
+    cats = []
+    cat = classification.get("category")
+    if cat:
+        cats.append(cat)
+    # Also treat multi-subject as a category if the classifier saw >1
+    # distinct object — keeps the contained-Y guidance live.
+    try:
+        if int(classification.get("n_distinct_objects", 1)) > 1:
+            cats.append("multi_subject")
+    except Exception:
+        pass
+
     t0 = time.time()
     (leader_js, leader_meta), (ours_js, ours_meta) = await asyncio.gather(
-        run_one_subprocess(leader_wt, stem, ref_path),
-        run_one_subprocess(ours_wt, stem, ref_path),
+        run_one_subprocess(leader_wt, stem, ref_path, categories=cats),
+        run_one_subprocess(ours_wt, stem, ref_path, categories=cats),
     )
     log.info(f"  generation took {time.time()-t0:.1f}s")
     log.info(f"  leader: status={leader_meta.get('status')} "

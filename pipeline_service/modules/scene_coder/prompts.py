@@ -52,6 +52,136 @@ Three.js output specification (condensed, authoritative):
 """
 
 
+# Few-shot example owners. Each example block starts at its "### Example..."
+# or "### Winning idiom..." header. The block ends at the next "### " or
+# "## " header. Universal blocks (Example 3b/3c builder patterns) are
+# absent from this map → always kept. Anything before the first "### "
+# (the introduction text) is core and kept verbatim.
+FEW_SHOT_OWNER = {
+    "### Example 1 — Wooden chair":                              {"furniture"},
+    "### Furniture pattern — Upholstered loveseat / sofa":       {"furniture"},
+    "### Furniture pattern — Slatted chaise lounge":             {"furniture"},
+    "### Example 2 — Glass bottle":                              {"pottery", "vessel", "decoration"},
+    "### Example 3 — SUV":                                       {"vehicle"},
+    "### Example 4 — Ceramic floral decals":                     {"pottery", "decoration"},
+    "### Winning idiom — glass bottle":                          {"pottery", "vessel"},
+    "### Winning idiom — wheeled / metallic object":             {"vehicle"},
+    "### Winning idiom — matte ceramic / wood":                  {"pottery", "decoration"},
+    "### Winning idiom — polished marble / ceramic vase":        {"pottery", "vessel"},
+    "### Winning idiom — wax / candle composition":              {"pottery"},
+    # Example 3b (cup-on-saucer) and 3c (strawberry-juice) are universal
+    # builder-pattern demonstrations — always kept.
+}
+
+
+def _strip_few_shot(text: str, start_marker: str) -> str:
+    """Remove one few-shot example block, from start_marker until the next
+    header of the same level (`### `, `## `, or the file's natural end)."""
+    i = text.find(start_marker)
+    if i < 0:
+        return text
+    # End = nearest of (next "### " or "## " or trailing). We must skip
+    # markdown headers that live inside the block (e.g. `## Main limits`
+    # could appear inside; assume `### ` and stand-alone `## Winning ...`
+    # are valid block boundaries).
+    j = len(text)
+    for sep in ("\n### ", "\n## Winning idioms"):
+        k = text.find(sep, i + len(start_marker))
+        if k != -1 and k < j:
+            j = k
+    return text[:i].rstrip() + "\n\n" + text[j:].lstrip()
+
+
+# Map handbook headers → category names that need them. Used by
+# build_system_prompt(categories) to prune sections that don't apply.
+# A section is "owned" by a category and is dropped when that category is
+# absent from the requested list. Headers below MUST match the in-prompt
+# section headers exactly (single colon, then newline). Anything not in
+# this map stays in the prompt unconditionally (= core).
+HANDBOOK_OWNER = {
+    "Seating furniture / upholstery handbook:": {"furniture"},
+    "Surface decoration / decal handbook:":     {"pottery", "decoration"},
+    "Vehicle modeling playbook:":               {"vehicle"},
+    "Silhouette illustration":                  {"pottery", "vessel"},
+    "Vehicle proportion cheat-sheet":           {"vehicle"},
+    "Dial-face illustration":                   {"instrument", "machine"},
+    # Multi-subject illustration intentionally absent → always kept.
+    # Pre-modeling checklist, output rules, API rules, material ref,
+    # modeling strategy, proportion tuning shortcut are core.
+}
+
+# Headers that, regardless of section, mark the END of a handbook block.
+# A handbook starts at its header and ends right before the next of these.
+_ALL_SECTION_STARTS = [
+    "Critical API rules",
+    "Material normalization",
+    "Pre-modeling checklist",
+    "Modeling strategy:",
+    "Seating furniture / upholstery handbook:",
+    "Surface decoration / decal handbook:",
+    "Vehicle modeling playbook:",
+    "Silhouette illustration",
+    "Proportion tuning shortcut:",
+    "Multi-subject illustration",
+    "Vehicle proportion cheat-sheet",
+    "Dial-face illustration",
+]
+
+
+_HANDBOOK_END_SENTINEL = "\n\n---\n\n"  # separates handbooks from THREEJS_OUTPUT_SPEC_REFERENCE etc.
+
+
+def _strip_section(text: str, start_marker: str) -> str:
+    """Remove the block starting at `start_marker` up to (but not including) the
+    next known section header. Only operates on the handbook portion of the
+    text (before the first `---` separator) so few-shot examples are safe."""
+    cut = text.find(_HANDBOOK_END_SENTINEL)
+    if cut < 0:
+        head, tail = text, ""
+    else:
+        head, tail = text[:cut], text[cut:]
+    i = head.find(start_marker)
+    if i < 0:
+        return text
+    next_pos = len(head)
+    for h in _ALL_SECTION_STARTS:
+        if h == start_marker:
+            continue
+        # Skip markers that are prefixes of our own (e.g. "Vehicle modeling
+        # playbook" must not match "Vehicle proportion cheat-sheet" when
+        # we're stripping the former and vice-versa).
+        j = head.find(h, i + len(start_marker))
+        if j != -1 and j < next_pos:
+            next_pos = j
+    head = head[:i].rstrip() + "\n\n" + head[next_pos:].lstrip()
+    return head + tail
+
+
+def build_system_prompt(categories: list[str] | None = None) -> str:
+    """Compose the coder system prompt with only the relevant handbooks AND
+    only the relevant few-shot examples.
+
+    If `categories` is None or empty, returns the full prompt unchanged
+    (production / unknown-category fallback). Otherwise drops handbooks
+    and few-shot example blocks whose owning categories do not intersect
+    the requested list. Universal pieces (pre-modeling checklist, multi-
+    subject illustration, Examples 3b and 3c) are always kept.
+    """
+    text = CODER_SYSTEM_PROMPT
+    if not categories:
+        return text
+    req = set(categories)
+    for header, owners in HANDBOOK_OWNER.items():
+        if owners & req:
+            continue
+        text = _strip_section(text, header)
+    for header, owners in FEW_SHOT_OWNER.items():
+        if owners & req:
+            continue
+        text = _strip_few_shot(text, header)
+    return text
+
+
 CODER_SYSTEM_PROMPT = (
     """You are a procedural Three.js code generator for Crucible3D.
 
