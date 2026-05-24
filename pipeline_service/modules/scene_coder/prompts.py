@@ -130,6 +130,43 @@ the phrase — pick exact PBR params, don't improvise):
   emissive / LED              MeshStandardMaterial  emissive=color emissiveIntensity 1.0
   generic / unsure            MeshStandardMaterial  metalness 0.0 roughness 0.7
 
+Pre-modeling checklist (run through this BEFORE writing any geometry —
+this is the single biggest predictor of a correct render):
+1. INVENTORY · list every visually distinct element in the reference,
+   including contents inside transparent / open containers (liquid,
+   floating pieces, food in bowl, items in jar). Each one becomes a
+   named THREE.Group or named Mesh. Visually-dominant features are
+   never dropped, even if they're "inside" or "behind" something else.
+2. SILHOUETTE · trace the outline from the implied view. Ask: is the
+   rim/footprint a circle? If it's almond/vesica/leaf/oval/kidney/
+   teardrop/canoe/banana-curve/crescent or any pinched asymmetric
+   outline, do NOT use Cylinder/Sphere/Torus/Lathe defaults. Use a
+   2D Shape with bezierCurveTo for pinched ends, then ExtrudeGeometry;
+   or LatheGeometry with non-uniform `mesh.scale.set(sx, 1, sz)`.
+3. COLOR ZONES · identify each color region. If the reference has
+   distinct color bands or two-tone (red blush on yellow fruit, dark
+   purple bottom layer of dessert, painted logo on bottle), model
+   each zone with its own material/sub-mesh, not one flat color.
+4. ORIENTATION · objects with a clear FRONT FACE (clocks, compasses,
+   watches, phones, monitors, gauges, instruments, picture frames)
+   must have that face pointing toward the camera (+Z), not flipped
+   sideways or upside down. Body extrudes back along −Z.
+5. ATTACHMENT · every visible part either OVERLAPS with its parent
+   (handle into mug, ring into watch case, leg into seat-bottom) or
+   is intentionally separate per the reference. Air gaps and
+   intersection-holes both look wrong. Seats sit flush on top of
+   legs (`seat.bottom_y == leg.top_y`); leg cylinders never punch
+   through each other.
+6. PROPORTIONS FIRST · pick the object class, then its L:W:H ratio
+   from a mental class library (sedan ~ 4 : 1.6 : 1.25, stool seat
+   thickness ~ 15 % of total height, sword blade ~ 5 × handle, etc.).
+   Get this right before adding trim and small features.
+7. NO DEFAULT FALLBACK · if you're unsure, do NOT default to
+   "generic bowl / cube / sphere". Re-read the silhouette and color
+   zones from the reference until you can pick a primitive that
+   actually matches what you see. A wrong-shape match-material loses
+   to a right-shape mediocre-material every time.
+
 Modeling strategy:
 - Translate the OSD into a clear part hierarchy.
 - Use box/cylinder/sphere/cone/torus for simple components.
@@ -239,30 +276,13 @@ Vehicle modeling playbook:
   silhouette, count, orientation, and attachment correct; then add trim,
   colors, logos, spokes, tread, and small hardware.
 
-Silhouette / rim-profile check (CRITICAL — most miners default to symmetric primitives even when the reference clearly shows an asymmetric shape):
-- BEFORE picking the primitive, examine the reference and ask: from
-  the implied top-down view, is the RIM (or footprint) a CIRCLE?
-  If not, do NOT use CylinderGeometry, SphereGeometry, TorusGeometry,
-  or any rotationally symmetric default.
-- Non-circular rim/footprint shapes (treat with explicit profile):
-  almond, vesica, leaf, eye, canoe, lens, ellipse, oval, kidney,
-  teardrop, sailboat, surfboard, pinched-at-one-or-both-ends,
-  crescent, banana-curve, S-curve, free-form irregular.
-- Recipes for those shapes:
-  · Sharp-pointed almond/vesica/canoe (pointed at both ends along
-    the long axis): build a 2D `THREE.Shape` using `moveTo` + two
-    `bezierCurveTo` calls (one for each long side), then
-    `THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: true })`
-    for the vessel body. Add a sunken interior with a slightly
-    smaller scaled copy if it's a hollow bowl.
-  · Smooth ellipse / oval rim: LatheGeometry for the height profile,
-    then `mesh.scale.set(sx, 1, sz)` with `sx ≠ sz` to elongate.
-  · Kidney/curved silhouette: SplineCurve in 2D Shape with control
-    points along the kidney outline, then ExtrudeGeometry.
-- A flat black/dark-glaze reference with no visible interior detail
-  is a STRONG hint that the silhouette IS the whole story — get the
-  outline RIGHT first, finishes second. A wrong silhouette + perfect
-  material still reads as the wrong object.
+Silhouette illustration (an application of checklist rule #2):
+- Sharp-pointed almond/vesica/canoe: 2D Shape with two bezierCurveTo
+  long sides, then `ExtrudeGeometry(shape, {depth, bevelEnabled:true})`.
+- Smooth ellipse/oval: LatheGeometry then `mesh.scale.set(sx, 1, sz)`
+  with `sx ≠ sz`.
+- Kidney/curved free-form: SplineCurve points along the outline, then
+  ExtrudeGeometry.
 
 Proportion tuning shortcut:
 - The fastest fix for a `wrong_proportion` issue is usually
@@ -270,50 +290,16 @@ Proportion tuning shortcut:
   geometry with new params. Rebuilding is necessary only when the primitive
   type itself must change (e.g. cylinder → cone, box → extrude).
 
-Multi-subject scene handbook (CRITICAL — most miners get this wrong):
-- If the reference image contains TWO OR MORE distinct subjects (e.g. a cup
-  AND a plate, a phone AND its charger, a person figure AND a chair, two
-  different cars, a mug with a spoon next to it), you MUST model EACH
-  subject as its own named THREE.Group and add ALL of them to `root`.
-  Do not silently drop the second/third subject just because it is smaller
-  or partially occluded.
-- Inventory rule: scan the image and enumerate every visually independent
-  object before writing geometry. A subject is "independent" when it has
-  its own silhouette and would still exist if you removed the other one.
-- Use explicit named groups: `const subjectA = new THREE.Group();` and
-  `const subjectB = new THREE.Group();` with `parts[]`-style child meshes
-  on each. Position them relative to the scene (`subjectB.position.set(...)`)
-  so their spatial relationship matches the reference: side-by-side,
-  stacked, in-front-of-each-other, etc.
-- Scale each subject so the BOUNDING BOX of all subjects together fits the
-  unit cube. Do NOT call fitToUnitCube on each subject individually — call
-  it once on `root` after both subjects are attached. Otherwise the smaller
-  subject blows up to the same size as the larger.
-- Common multi-subject cues that this is what you're seeing:
-  · "X on a Y" (object on tray/plate/saucer/stand/base)
-  · "X and Y" (any conjunction in the implied scene)
-  · "X with Y" where Y is detachable (mug with spoon, phone with case-off)
-  · Two of the same class at different sizes/orientations
-  · A figure interacting with a tool / instrument / vehicle
-- CONTAINED relationships (also multi-subject — most miners miss this):
-  · "X containing Y" / "filled X" / "X of Y": glass of orange juice with
-    floating fruit pieces, mug of coffee with foam on top, vase with
-    flowers, jar of marbles, bowl of food, lamp with bulb, terrarium
-    with plants, transparent box showing items inside, kettle with
-    visible water level.
-  · For transparent / translucent containers (glass, jar, beaker): use
-    MeshPhysicalMaterial transmission≈0.7-0.95 for the shell, then
-    model the LIQUID as a separate filled solid (CylinderGeometry
-    inset slightly inside the container, colored MeshStandardMaterial
-    with low roughness if it's juice/wine/oil). Place SOLID FLOATING
-    PIECES (fruit slices, ice cubes, garnish) as small Sphere/Box/
-    irregular meshes positioned inside the liquid volume — NOT as
-    decoration spots on the glass surface.
-  · For opaque containers with visible contents (bowl, plate): the
-    contents (food, flowers, objects) are independent subjects placed
-    inside/on top of the container body.
-  · Never reduce "X containing Y" to "just X" — the contents are
-    usually the visually dominant part of the reference image.
+Multi-subject illustration (an application of the INVENTORY checklist rule):
+- Cues you're looking at a multi-subject scene: "X on Y", "X and Y",
+  "X with Y", "X containing/filled with Y" (drink+fruit in glass,
+  flowers in vase, food in bowl, items in jar, two of the same class).
+- Pattern: one named THREE.Group per subject, all attached to `root`,
+  one fitToUnitCube call at the end on `root` (NEVER per subject —
+  smaller subjects blow up otherwise).
+- Transparent containers: MeshPhysicalMaterial (transmission 0.7-0.95)
+  shell + separate LIQUID mesh inset just inside + SOLID PIECES inside
+  the liquid volume (not as surface dots on the glass).
 
 Vehicle proportion cheat-sheet (use BEFORE you start meshing — wrong
 proportions are the most-common reason cars look bad):
@@ -340,34 +326,12 @@ proportions are the most-common reason cars look bad):
   mirrors (small attached pods near A-pillar), door seams (thin dark
   vertical lines), wheel arches (concave cutout above each wheel).
 
-Instrument / dial-face handbook (clocks, compasses, watches, gauges,
-meters, dials, speedometers, barometers, stopwatches, pocket watches):
-- The DIAL FACE is the defining feature — it MUST face +Z (toward the
-  camera). Do not lay the instrument flat with its face hidden. If
-  unsure of orientation, default to: face plane perpendicular to +Z,
-  bezel/case extruded back along -Z.
-- Build order: (1) circular case/bezel ring (TorusGeometry or thin
-  CylinderGeometry shell), (2) flat dial face (thin CircleGeometry
-  with `dialMat`), (3) markings on the face, (4) hands/needle, (5)
-  crystal/glass dome ON TOP (slight z-offset), (6) attached hinge/
-  ring/loop/crown.
-- Markings (numbers, hour ticks, N/S/E/W letters): use ShapeGeometry,
-  flat ExtrudeGeometry (thin), or small CircleGeometry dots placed
-  AT THE FACE PLANE with tiny +Z offset (~0.002). Numbers should sit
-  on a circle of radius ~0.8 × dial radius. Do not float markings
-  away from the face.
-- Hands / needles: thin elongated boxes or thin extrusions, pivoting
-  at the dial center, rotated about the +Z axis. Hour/minute hand
-  pair on clocks; single magnetic needle (often N-pointer red, S-
-  pointer white) on compass.
-- Hinge / ring / loop / crown / chain ring: MUST be physically
-  attached to the case body. Place at the top (12 o'clock direction)
-  and overlap the bezel by ~30% so it reads as connected. Never let
-  the loop float in empty space.
-- Cover glass / crystal: thin CylinderGeometry (very low height) or
-  ShapeGeometry with MeshPhysicalMaterial transmission≈0.9, mounted
-  flush with the bezel. Do not omit it for pocket watches /
-  compasses — the dome over the face is iconic.
+Dial-face illustration (an application of checklist rules #4 and #5
+for clocks, compasses, watches, gauges):
+- Build order from camera outward: bezel ring → flat dial face →
+  markings as flat decals on the face (tiny +Z offset) → hands/needle
+  pivoting at center → glass dome on top → attached hinge/ring/crown
+  (overlap bezel by ~30%, never float).
 """
     + "\n\n---\n\n"
     + THREEJS_OUTPUT_SPEC_REFERENCE
@@ -389,45 +353,12 @@ Reminders before you write:
   visual critic will refer to parts by that name in later repair rounds.
 - Use the material normalization quick-reference from your system prompt
   — don't improvise PBR values.
-- If this is seating furniture, use the seating furniture handbook: build
-  distinct cushions, back modules, arms, legs/frame, seams/piping, and any
-  tufted buttons or slats before minor decorative details.
-- If the object has painted/printed floral or ornamental texture, use the
-  surface decoration handbook: motifs must be flat or shallow, parented to
-  the object, and placed just above the surface normal, not floating around it.
-- If this is a vehicle, use BOTH the vehicle modeling playbook AND the
-  vehicle proportion cheat-sheet: pick the body class (sedan / SUV /
-  coupe / pickup / van) and use that class's L:W:H ratio. Inset the
-  glass from the body, split side glass at A/C-pillars, and add
-  grille + lights + bumpers + mirrors + door seams + wheel arches.
-  Wrong proportions are the #1 reason cars look like generic boxes.
-- If the reference shows TWO OR MORE distinct subjects (object on a
-  plate, mug with a spoon, figure with a tool, two cars, etc.) OR a
-  CONTAINER with visible CONTENTS (glass of juice with fruit, vase
-  with flowers, jar of items, bowl of food), follow the multi-subject
-  scene handbook: model EVERY subject (container AND its contents) as
-  its own named THREE.Group, position them to match the reference's
-  spatial layout, and call fitToUnitCube once on `root` after
-  attaching all of them. Do not drop the contents / smaller / partially
-  occluded subject — the contents are often the visually dominant part.
-- If this is an INSTRUMENT WITH A DIAL FACE (clock, compass, watch,
-  gauge, meter, stopwatch), use the instrument/dial-face handbook:
-  the face MUST face +Z (toward the camera). Build bezel → flat dial
-  face → markings as flat decals on the face → hands/needle pivoting
-  at center → glass dome on top → hinge/ring/crown ATTACHED to the
-  case (no float).
-- For stools, benches, chairs, tables, the seat/top slab's bottom
-  must touch the top of every leg with no air gap. Cabriole legs
-  attach at the SEAT CORNERS and S-curve outward then inward. Do not
-  let leg cylinders intersect each other or the seat slab — gives
-  visible geometry holes.
-- Before writing geometry, ask: is the silhouette / rim a circle? If
-  the reference shows an almond / vesica / oval / kidney / leaf /
-  canoe / lens / teardrop / curved-asymmetric shape, follow the
-  Silhouette/rim-profile check — use ExtrudeGeometry with a custom
-  2D Shape (bezierCurveTo for smooth pinched points) or scale a
-  LatheGeometry non-uniformly. Default cylinders/spheres on
-  non-circular references is the #1 cause of "wrong object" verdicts.
+- Run the pre-modeling checklist from your system prompt: (1) inventory
+  every visible component including contents, (2) silhouette before
+  primitive, (3) color zones, (4) orientation toward +Z for faced
+  objects, (5) attachment / no float / no intersection hole, (6)
+  proportions first, (7) no symmetric-primitive default fallback.
+- Match the material normalization quick-reference, not improvised PBR.
 - Call your `fitToUnitCube` helper with `0.95 / maxDim` so the object
   fills ~95% of the frame (not lost in background).
 
@@ -442,45 +373,12 @@ Reminders before you write:
   part (lowercase, underscores) so the critic can target it later.
 - Use the material normalization quick-reference from your system prompt
   — don't improvise PBR values.
-- If this is seating furniture, use the seating furniture handbook: build
-  distinct cushions, back modules, arms, legs/frame, seams/piping, and any
-  tufted buttons or slats before minor decorative details.
-- If the object has painted/printed floral or ornamental texture, use the
-  surface decoration handbook: motifs must be flat or shallow, parented to
-  the object, and placed just above the surface normal, not floating around it.
-- If this is a vehicle, use BOTH the vehicle modeling playbook AND the
-  vehicle proportion cheat-sheet: pick the body class (sedan / SUV /
-  coupe / pickup / van) and use that class's L:W:H ratio. Inset the
-  glass from the body, split side glass at A/C-pillars, and add
-  grille + lights + bumpers + mirrors + door seams + wheel arches.
-  Wrong proportions are the #1 reason cars look like generic boxes.
-- If the reference shows TWO OR MORE distinct subjects (object on a
-  plate, mug with a spoon, figure with a tool, two cars, etc.) OR a
-  CONTAINER with visible CONTENTS (glass of juice with fruit, vase
-  with flowers, jar of items, bowl of food), follow the multi-subject
-  scene handbook: model EVERY subject (container AND its contents) as
-  its own named THREE.Group, position them to match the reference's
-  spatial layout, and call fitToUnitCube once on `root` after
-  attaching all of them. Do not drop the contents / smaller / partially
-  occluded subject — the contents are often the visually dominant part.
-- If this is an INSTRUMENT WITH A DIAL FACE (clock, compass, watch,
-  gauge, meter, stopwatch), use the instrument/dial-face handbook:
-  the face MUST face +Z (toward the camera). Build bezel → flat dial
-  face → markings as flat decals on the face → hands/needle pivoting
-  at center → glass dome on top → hinge/ring/crown ATTACHED to the
-  case (no float).
-- For stools, benches, chairs, tables, the seat/top slab's bottom
-  must touch the top of every leg with no air gap. Cabriole legs
-  attach at the SEAT CORNERS and S-curve outward then inward. Do not
-  let leg cylinders intersect each other or the seat slab — gives
-  visible geometry holes.
-- Before writing geometry, ask: is the silhouette / rim a circle? If
-  the reference shows an almond / vesica / oval / kidney / leaf /
-  canoe / lens / teardrop / curved-asymmetric shape, follow the
-  Silhouette/rim-profile check — use ExtrudeGeometry with a custom
-  2D Shape (bezierCurveTo for smooth pinched points) or scale a
-  LatheGeometry non-uniformly. Default cylinders/spheres on
-  non-circular references is the #1 cause of "wrong object" verdicts.
+- Run the pre-modeling checklist from your system prompt: (1) inventory
+  every visible component including contents, (2) silhouette before
+  primitive, (3) color zones, (4) orientation toward +Z for faced
+  objects, (5) attachment / no float / no intersection hole, (6)
+  proportions first, (7) no symmetric-primitive default fallback.
+- Match the material normalization quick-reference, not improvised PBR.
 - Call your `fitToUnitCube` helper with `0.95 / maxDim` so the object
   fills ~95% of the frame (not lost in background).
 
