@@ -152,14 +152,16 @@ async def main():
     # up the leaner prompt.
     if args.categories.strip():
         cats = [c.strip() for c in args.categories.split(",") if c.strip()]
-        pruned = _prompts.build_system_prompt(cats)
-        _prompts.CODER_SYSTEM_PROMPT = pruned
-        # SceneCoderAgent imported its own bound copy at module load time;
-        # rebind there too.
-        from modules.scene_coder import agent as _agent_mod
-        _agent_mod.CODER_SYSTEM_PROMPT = pruned
-        log.info(f"  prompt pruned for categories {cats}: {len(pruned)} chars "
-                 f"(full would be {len(_prompts.build_system_prompt(None))} chars)")
+        # Older worktrees (e.g. the leader-baseline checkout) may not have
+        # build_system_prompt — fall back silently and use the full prompt.
+        if hasattr(_prompts, "build_system_prompt"):
+            pruned = _prompts.build_system_prompt(cats)
+            _prompts.CODER_SYSTEM_PROMPT = pruned
+            from modules.scene_coder import agent as _agent_mod
+            _agent_mod.CODER_SYSTEM_PROMPT = pruned
+            log.info(f"  prompt pruned for categories {cats}: {len(pruned)} chars")
+        else:
+            log.info(f"  worktree lacks build_system_prompt; using full prompt")
     coder = SceneCoderAgent(client=client, model=MODEL, session_store=store,
                             temperature=0.0, seed=42, max_tokens=8192,
                             backend="vllm", total_stages=6)
