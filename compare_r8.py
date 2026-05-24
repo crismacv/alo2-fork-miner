@@ -585,9 +585,9 @@ DASHBOARD_CSS = """
 * { box-sizing:border-box }
 body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
        margin:0; background:var(--bg); color:var(--fg); font-size:13px; }
-header { padding:10px 18px; background:var(--panel); border-bottom:1px solid var(--border);
+header { padding:12px 20px; background:var(--panel); border-bottom:1px solid var(--border);
          position:sticky; top:0; z-index:50; }
-h1 { margin:0 0 4px; font-size:14px; font-weight:600; letter-spacing:.02em; }
+h1 { margin:0 0 6px; font-size:14px; font-weight:600; letter-spacing:.02em; }
 .tally-row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; font-size:11px; }
 .tally { display:inline-flex; gap:8px; padding:4px 10px; border-radius:5px;
          background:var(--panel2); border:1px solid var(--border);
@@ -602,32 +602,36 @@ h1 { margin:0 0 4px; font-size:14px; font-weight:600; letter-spacing:.02em; }
 .tally .ref { color:var(--muted); font-family:monospace; font-size:10px; }
 .meta { color:var(--muted); font-size:11px; }
 
-main { padding:12px 16px; display:flex; flex-direction:column; gap:10px; }
+main { padding:14px 18px; display:flex; flex-direction:column; gap:14px;
+       max-width:1200px; margin:0 auto; width:100%; }
 
-.duel { background:var(--panel); border:1px solid var(--border); border-radius:7px;
+.duel { background:var(--panel); border:1px solid var(--border); border-radius:8px;
         overflow:hidden; }
-.duel-top { display:grid; grid-template-columns:200px 200px 200px 1fr; gap:1px;
+.duel-top { display:grid; grid-template-columns:220px 220px 220px 1fr; gap:1px;
             background:var(--border); }
-.tile { background:var(--panel2); padding:6px; position:relative; }
-.tile h3 { margin:0 0 4px; font-size:9px; color:var(--muted); font-weight:500;
-           letter-spacing:.05em; text-transform:uppercase;
-           display:flex; justify-content:space-between; align-items:center; gap:6px; }
-.tile h3 .num { color:var(--fg); font-family:monospace; font-weight:600; font-size:10px; }
+.tile { background:var(--panel2); padding:10px; display:flex; flex-direction:column; gap:6px; }
+.tile-head { display:flex; justify-content:space-between; align-items:center; gap:8px;
+             min-height:22px; }
+.tile-head .label { font-size:10px; color:var(--muted); font-weight:500;
+                    letter-spacing:.05em; text-transform:uppercase; }
+.tile-head .num { color:var(--fg); font-family:monospace; font-weight:600; font-size:10px; }
 .tile img.main { width:100%; aspect-ratio:1/1; object-fit:cover; display:block;
-                 background:#222; border-radius:3px; }
-.tile .info { font-size:10px; color:var(--muted); margin-top:4px;
-              display:flex; justify-content:space-between; }
-.tile .controls { position:absolute; top:6px; right:8px; display:flex; gap:4px; }
-.btn3d { background:rgba(0,0,0,.6); color:var(--fg); border:1px solid rgba(255,255,255,.15);
-         padding:2px 6px; font-size:9px; border-radius:3px; cursor:pointer;
-         letter-spacing:.05em; text-transform:uppercase; }
-.btn3d:hover { background:var(--accent); color:#000; }
+                 background:#222; border-radius:4px; cursor:zoom-in;
+                 transition:filter .15s ease; }
+.tile img.main:hover { filter:brightness(1.08); }
+.tile .info { font-size:10px; color:var(--muted);
+              display:flex; justify-content:space-between; gap:8px; }
+.btn3d { background:var(--panel); color:var(--fg);
+         border:1px solid var(--border); padding:3px 9px; font-size:10px;
+         border-radius:4px; cursor:pointer; letter-spacing:.04em;
+         text-transform:uppercase; font-weight:500; white-space:nowrap; }
+.btn3d:hover { background:var(--accent); color:#000; border-color:var(--accent); }
 
-.summary-tile { background:var(--panel2); padding:8px 10px; display:flex;
-                flex-direction:column; gap:6px; }
+.summary-tile { background:var(--panel2); padding:10px 12px;
+                display:flex; flex-direction:column; gap:8px; }
 .summary-tile .stem { color:var(--muted); font-size:9px; font-family:monospace;
-                      word-break:break-all; line-height:1.3; }
-.summary-tile .verdict { font-size:12px; font-weight:600; padding:3px 8px;
+                      word-break:break-all; line-height:1.3; margin-top:auto; }
+.summary-tile .verdict { font-size:12px; font-weight:600; padding:4px 10px;
                          border-radius:4px; display:inline-block; align-self:flex-start;
                          text-transform:uppercase; letter-spacing:.04em; }
 .summary-tile .verdict.win { background:rgba(92,211,165,.15); color:var(--accent);
@@ -645,58 +649,68 @@ main { padding:12px 16px; display:flex; flex-direction:column; gap:10px; }
 .summary-tile .config { font-size:9px; color:var(--muted); font-family:monospace;
                         letter-spacing:.02em; }
 
-.strips { padding:6px; background:var(--panel); display:none; border-top:1px solid var(--border); }
+.strips { padding:8px; background:var(--panel); display:none; border-top:1px solid var(--border); }
 .strips.open { display:block; }
 .strip { display:grid; grid-template-columns:repeat(8,1fr); gap:3px;
-         padding:4px; margin-top:4px; border:1px solid var(--border); border-radius:4px;
+         padding:5px; margin-top:5px; border:1px solid var(--border); border-radius:4px;
          background:var(--panel2); }
 .strip:first-child { margin-top:0; }
-.strip-label { font-size:9px; color:var(--muted); padding:4px 4px 2px;
+.strip-label { font-size:9px; color:var(--muted); padding:5px 4px 3px;
                text-transform:uppercase; letter-spacing:.05em; }
 .strip img { width:100%; aspect-ratio:1/1; object-fit:cover; background:#222;
-             border-radius:2px; display:block; }
+             border-radius:2px; display:block; cursor:zoom-in; }
+.strip img:hover { filter:brightness(1.1); }
 .strip .missing { width:100%; aspect-ratio:1/1; background:#1a1a1f;
                   border:1px dashed var(--border); border-radius:2px;
                   display:flex; align-items:center; justify-content:center;
                   color:var(--muted); font-size:9px; }
 .toggle-strips { width:100%; background:var(--panel); color:var(--muted);
-                 border:none; border-top:1px solid var(--border); padding:4px;
+                 border:none; border-top:1px solid var(--border); padding:5px;
                  font-size:10px; cursor:pointer; letter-spacing:.05em;
-                 text-transform:uppercase; }
+                 text-transform:uppercase; font-weight:500; }
 .toggle-strips:hover { color:var(--fg); background:var(--panel2); }
 
-/* modal */
-#modal { position:fixed; inset:0; background:rgba(0,0,0,.85); display:none;
-         z-index:100; padding:30px; }
+/* modal — used for both 3D viewer and zoomed images */
+#modal { position:fixed; inset:0; background:rgba(0,0,0,.9); display:none;
+         z-index:100; padding:30px; align-items:center; justify-content:center; }
 #modal.open { display:flex; flex-direction:column; }
-#modal iframe { flex:1; border:1px solid var(--border); border-radius:6px;
-                background:#202024; }
+#modal iframe { flex:1; width:100%; border:1px solid var(--border); border-radius:6px;
+                background:#202024; min-height:0; }
+#modal img.zoomed { max-width:100%; max-height:100%; border:1px solid var(--border);
+                    border-radius:6px; background:#222; object-fit:contain; }
 #modal .close { position:absolute; top:14px; right:14px; background:var(--panel);
                 color:var(--fg); border:1px solid var(--border); padding:6px 12px;
-                border-radius:4px; cursor:pointer; }
-#modal .title { color:var(--muted); font-size:12px; margin-bottom:8px;
-                font-family:monospace; }
+                border-radius:4px; cursor:pointer; z-index:1; }
+#modal .title { color:var(--muted); font-size:12px; margin-bottom:10px;
+                font-family:monospace; align-self:flex-start; }
 """
 
 DASHBOARD_JS = """
-function open3d(src, title) {
+function _modalShow(title, mode) {
   const m = document.getElementById('modal');
-  const t = document.getElementById('modalTitle');
-  const f = document.getElementById('modalFrame');
-  t.textContent = title;
-  f.src = 'viewer.html?src=' + encodeURIComponent(src);
+  document.getElementById('modalTitle').textContent = title;
+  document.getElementById('modalFrame').style.display = (mode === '3d') ? '' : 'none';
+  document.getElementById('modalImg').style.display = (mode === 'img') ? '' : 'none';
   m.classList.add('open');
 }
-function close3d() {
+function open3d(src, title) {
+  document.getElementById('modalFrame').src = 'viewer.html?src=' + encodeURIComponent(src);
+  _modalShow(title, '3d');
+}
+function openImg(src, title) {
+  document.getElementById('modalImg').src = src;
+  _modalShow(title, 'img');
+}
+function closeModal() {
   const m = document.getElementById('modal');
-  const f = document.getElementById('modalFrame');
+  document.getElementById('modalFrame').src = '';
+  document.getElementById('modalImg').src = '';
   m.classList.remove('open');
-  f.src = '';
 }
 function toggleStrips(id) {
   document.getElementById(id).classList.toggle('open');
 }
-window.addEventListener('keydown', e => { if (e.key === 'Escape') close3d(); });
+window.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 """
 
 
@@ -820,32 +834,52 @@ def write_dashboard():
 
         strips_id = f"strips-{idx}"
         stem_short = r['stem'][:10]
+        ref_path = r.get('ref') or ''
         leader_btn = (f'<button class=btn3d onclick="open3d(&quot;{leader_js_src}&quot;,'
                       f'&quot;leader · {stem_short}&quot;)">3D</button>') if leader_js_src else ''
         ours_btn = (f'<button class=btn3d onclick="open3d(&quot;{ours_js_src}&quot;,'
                     f'&quot;ours · {stem_short}&quot;)">3D</button>') if ours_js_src else ''
+        ref_btn = (f'<button class=btn3d onclick="openImg(&quot;{ref_path}&quot;,'
+                   f'&quot;reference · {stem_short}&quot;)">Zoom</button>') if ref_path else ''
+        leader_zoom_btn = (f'<button class=btn3d onclick="openImg(&quot;{leader_main}&quot;,'
+                           f'&quot;leader render · {stem_short}&quot;)">Zoom</button>') if leader_main else ''
+        ours_zoom_btn = (f'<button class=btn3d onclick="openImg(&quot;{ours_main}&quot;,'
+                         f'&quot;ours render · {stem_short}&quot;)">Zoom</button>') if ours_main else ''
         leader_penalty = r.get('judge', {}).get('leader', '—')
         ours_penalty = r.get('judge', {}).get('ours', '—')
+
+        # Tile head right column: each tile gets a small action row separate
+        # from the title so buttons never overlap text.
+        ref_onclick = f"onclick=\"openImg('{ref_path}','reference · {stem_short}')\"" if ref_path else ""
+        leader_img_onclick = f"onclick=\"openImg('{leader_main}','leader render · {stem_short}')\"" if leader_main else ""
+        ours_img_onclick = f"onclick=\"openImg('{ours_main}','ours render · {stem_short}')\"" if ours_main else ""
 
         parts.append(f"""
 <div class=duel>
   <div class=duel-top>
     <div class=tile>
-      <h3><span>Reference</span><span class=num>{ts_str}</span></h3>
-      <img class=main src="{r.get('ref') or ''}">
-      <div class=info><span>{cls_info}</span></div>
+      <div class=tile-head>
+        <span class=label>Reference</span>
+        {ref_btn}
+      </div>
+      <img class=main src="{ref_path}" {ref_onclick}>
+      <div class=info><span>{cls_info}</span><span>{ts_str}</span></div>
     </div>
     <div class=tile>
-      <h3><span>Leader · {lref_short}</span><span class=num>L={leader_penalty}</span></h3>
-      <img class=main src="{leader_main}">
-      <div class=controls>{leader_btn}</div>
-      <div class=info><span>critic {ls}</span><span>{lm.get('dt', 0):.0f}s</span></div>
+      <div class=tile-head>
+        <span class=label>Leader · {lref_short}</span>
+        {leader_btn}
+      </div>
+      <img class=main src="{leader_main}" {leader_img_onclick}>
+      <div class=info><span>critic {ls}</span><span>penalty {leader_penalty}</span><span>{lm.get('dt', 0):.0f}s</span></div>
     </div>
     <div class=tile>
-      <h3><span>Ours · {oref_short}</span><span class=num>O={ours_penalty}</span></h3>
-      <img class=main src="{ours_main}">
-      <div class=controls>{ours_btn}</div>
-      <div class=info><span>critic {os_}</span><span>{om.get('dt', 0):.0f}s</span></div>
+      <div class=tile-head>
+        <span class=label>Ours · {oref_short}</span>
+        {ours_btn}
+      </div>
+      <img class=main src="{ours_main}" {ours_img_onclick}>
+      <div class=info><span>critic {os_}</span><span>penalty {ours_penalty}</span><span>{om.get('dt', 0):.0f}s</span></div>
     </div>
     <div class="tile summary-tile">
       <span class="verdict {verdict_cls}">{verdict_label}</span>
@@ -864,10 +898,11 @@ def write_dashboard():
 </div>""")
 
     parts.append("""</main>
-<div id="modal">
-  <button class=close onclick="close3d()">close ✕  (Esc)</button>
+<div id="modal" onclick="if(event.target.id==='modal')closeModal()">
+  <button class=close onclick="closeModal()">close ✕  (Esc)</button>
   <div class=title id="modalTitle"></div>
-  <iframe id="modalFrame"></iframe>
+  <iframe id="modalFrame" style="display:none"></iframe>
+  <img id="modalImg" class=zoomed style="display:none">
 </div>
 <script>""" + DASHBOARD_JS + "</script>")
 

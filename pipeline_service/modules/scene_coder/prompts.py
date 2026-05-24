@@ -268,6 +268,26 @@ this is the single biggest predictor of a correct render):
        including contents inside transparent or open containers (liquid,
        floating pieces, food in bowl, items in jar). Typical count is
        1-5 subjects.
+       PATTERN vs SUBJECT — most miners over-decompose surface patterns
+       into many subjects, wasting structure and rendering them as a
+       stack of misaligned shapes. Apply this distinction strictly:
+       · SUBJECT (separate builder + own mesh): things that have their
+         own 3D silhouette and would still exist if removed — a cup,
+         a strawberry inside a glass, a wheel of a car, a button on a
+         calculator, a candle next to a vase.
+       · PATTERN (one mesh + material/texture variation only): things
+         that are PRINTED, PAINTED, WOVEN, DYED, or otherwise FLAT on
+         a single underlying surface — rainbow stripes on a blanket
+         (one mattress slab with vertical color bands as sub-mesh
+         strips, NOT N stacked log shapes), polka dots on fabric,
+         logo on a bottle, plaid pattern, gradient. For patterns,
+         model the underlying surface as one builder, then add color
+         bands / decals via narrow thin sub-meshes parented to the
+         same surface, NOT as independent subjects in the inventory.
+       · DECISION HEURISTIC · if the elements are FLUSH with the
+         surface (no thickness, no shadow on the surface) → pattern.
+         If they CAST A SHADOW or have visible thickness/depth from
+         the surface → subject.
    (b) Decompose · write ONE small builder function per subject. Each
        builder takes `THREE` and returns a `THREE.Group` containing
        just that subject's meshes, in its own local coordinate system,
@@ -329,6 +349,24 @@ this is the single biggest predictor of a correct render):
    intersection-holes both look wrong. Seats sit flush on top of
    legs (`seat.bottom_y == leg.top_y`); leg cylinders never punch
    through each other.
+   COORDINATE-SYSTEM RULE (CRITICAL — most "parts floating off the
+   body" bugs come from this single mistake):
+   - `THREE.BoxGeometry(w, h, d)` and `CylinderGeometry/ConeGeometry`
+     are CENTERED at the mesh's local origin. A box of height `h`
+     placed at `y = 0` spans `y ∈ [-h/2, +h/2]`, NOT `[0, h]`.
+   - To place a child on the FRONT FACE of a body centered at
+     `(bodyX, bodyY, bodyZ)` with depth `bodyD`:
+       child.z = bodyZ + bodyD/2 + childD/2
+   - To place a child along the body's height (a button row at the
+     "top third" of the front face) use fractions of `±bodyH/2`:
+       child.y = bodyY + bodyH/2 * f    where f ∈ [-1, +1]
+     NOT `bodyY + bodyH * f` — that's twice as far and pushes the
+     child off the body.
+   - For "on top of": child.y = parent.y + parentH/2 + childH/2
+     For "on bottom of": child.y = parent.y - parentH/2 - childH/2
+   - When stacking N elements on a face, compute the row span
+     explicitly: `rowHalfSpan = (N-1)/2 * spacing`, then
+     `child[i].y = centerY + (i - (N-1)/2) * spacing`.
 6. PROPORTIONS FIRST · pick the object class, then its L:W:H ratio
    from a mental class library (sedan ~ 4 : 1.6 : 1.25, stool seat
    thickness ~ 15 % of total height, sword blade ~ 5 × handle, etc.).

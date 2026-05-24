@@ -114,6 +114,13 @@ Critical rules:
   groups separately if the colors / shapes differ.
 - For vehicles, include wheels (count=4), headlights (count=2), etc.
 - Include the container as its own subject.
+- PATTERN vs SUBJECT — surface patterns (rainbow stripes on a blanket,
+  polka dots on fabric, logo painted on a bottle, plaid, gradient) are
+  NOT separate subjects. They are flat color bands on the underlying
+  surface. List only the underlying surface as a subject and describe
+  the pattern in its `color` or `placement` field (e.g.
+  "rainbow_striped_horizontal", "polka_dotted"). If the elements have
+  no shadow or thickness — flush with the surface — they are patterns.
 """
 
 
