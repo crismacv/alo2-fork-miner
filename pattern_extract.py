@@ -199,37 +199,53 @@ def compose_grid(ref_bytes: bytes, pattern_bytes: bytes, *,
                   colors: list[dict] | None = None,
                   pattern_kind: str = "") -> bytes:
     """2x1 layout (top: ref, bottom: pattern crop) + caption strip with
-    the dominant-color hex codes. Output is a single PNG."""
+    the dominant-color hex codes. Output is a single PNG. The top region
+    carries a bold instruction so the coder doesn't try to model the
+    background scene shown in the reference."""
     ref = Image.open(io.BytesIO(ref_bytes)).convert("RGB")
     pat = Image.open(io.BytesIO(pattern_bytes)).convert("RGB")
     W = 800
-    ref_h = 600
+    inst_h = 56
+    ref_h = 580
     pat_h = 600
     cap_h = 80
-    out = Image.new("RGB", (W, ref_h + pat_h + cap_h), (200, 200, 200))
-    # Top: ref
-    ref2 = ref.copy(); ref2.thumbnail((W, ref_h), Image.LANCZOS)
-    out.paste(ref2, ((W - ref2.size[0]) // 2, (ref_h - ref2.size[1]) // 2))
-    # Bottom: pattern
-    pat2 = pat.copy(); pat2.thumbnail((W, pat_h), Image.LANCZOS)
-    out.paste(pat2, ((W - pat2.size[0]) // 2, ref_h + (pat_h - pat2.size[1]) // 2))
-    # Caption strip with color swatches
+    out = Image.new("RGB", (W, inst_h + ref_h + pat_h + cap_h), (200, 200, 200))
     drw = ImageDraw.Draw(out)
-    drw.rectangle([0, ref_h + pat_h, W, ref_h + pat_h + cap_h], fill=(35, 35, 40))
-    label = f"top=shape  bottom=pattern  kind={pattern_kind}"
     try:
+        font_big = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 18)
         font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 14)
     except Exception:
-        font = ImageFont.load_default()
-    drw.text((10, ref_h + pat_h + 8), label, fill=(220, 220, 220), font=font)
-    # Swatches
+        font_big = ImageFont.load_default(); font = ImageFont.load_default()
+    # Instruction strip at the very top
+    drw.rectangle([0, 0, W, inst_h], fill=(50, 30, 30))
+    drw.text((10, 4),
+             "MODEL ONLY THE FOREGROUND OBJECT in panel A.",
+             fill=(255, 220, 200), font=font_big)
+    drw.text((10, 30),
+             "Panel B = surface PATTERN/TEXTURE for that object — not a separate item.",
+             fill=(220, 220, 220), font=font)
+    # Panel A: ref (object + scene; ignore scene)
+    ref2 = ref.copy(); ref2.thumbnail((W, ref_h), Image.LANCZOS)
+    out.paste(ref2, ((W - ref2.size[0]) // 2, inst_h + (ref_h - ref2.size[1]) // 2))
+    drw.text((10, inst_h + 4), "A: shape (model only foreground)",
+             fill=(220, 220, 100), font=font)
+    # Panel B: pattern crop
+    pat2 = pat.copy(); pat2.thumbnail((W, pat_h), Image.LANCZOS)
+    out.paste(pat2, ((W - pat2.size[0]) // 2, inst_h + ref_h + (pat_h - pat2.size[1]) // 2))
+    drw.text((10, inst_h + ref_h + 4), "B: surface pattern (apply via colored sub-meshes)",
+             fill=(100, 220, 220), font=font)
+    # Caption strip with color swatches
+    cap_y = inst_h + ref_h + pat_h
+    drw.rectangle([0, cap_y, W, cap_y + cap_h], fill=(35, 35, 40))
+    label = f"pattern kind = {pattern_kind}"
+    drw.text((10, cap_y + 8), label, fill=(220, 220, 220), font=font)
     if colors:
         sw_x = 10
         for c in colors[:5]:
             hex_rgb = c["hex"].lstrip("#")
             rgb = (int(hex_rgb[0:2], 16), int(hex_rgb[2:4], 16), int(hex_rgb[4:6], 16))
-            drw.rectangle([sw_x, ref_h + pat_h + 36, sw_x + 80, ref_h + pat_h + 72], fill=rgb)
-            drw.text((sw_x + 4, ref_h + pat_h + 38),
+            drw.rectangle([sw_x, cap_y + 36, sw_x + 80, cap_y + 72], fill=rgb)
+            drw.text((sw_x + 4, cap_y + 38),
                      f"{c['hex']} {c['fraction']:.0%}", fill=(240, 240, 240),
                      font=font)
             sw_x += 90
