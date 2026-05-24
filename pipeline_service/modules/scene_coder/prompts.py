@@ -321,6 +321,26 @@ this is the single biggest predictor of a correct render):
    (e) Single-subject case · still use one builder function and the
        inventory comment — the discipline carries over and makes
        single-object code uniformly clean.
+   (f) MANDATORY structure (most important rule in this checklist):
+       If the inventory has 2 or more elements, the body of
+       `generate(THREE)` MUST contain ONLY:
+         · one `const root = new THREE.Group();` line
+         · the two `// inventory:` and `// layout:` comment lines
+         · one `const <name> = build<Name>(THREE);` line per inventoried
+           element (and optional `for` loop for repeated builders)
+         · one `<name>.position.set(...)` / `.rotation.set(...)` line
+           per element to place it in the scene
+         · `root.add(<name>);` calls
+         · final `fitToUnitCube(THREE, root); return root;`
+       The body should fit in ≤ 25 lines. NO Mesh/Geometry/Material
+       construction inline in `generate()`. NO hard-coded positional
+       constants without comments explaining what reference dimension
+       they are derived from. If you find yourself writing
+       `new THREE.BoxGeometry(...)` inside `generate()`, STOP — that
+       geometry belongs inside a `buildXxx` function. Inline geometry
+       inside `generate()` when n≥2 is the #1 cause of "pieces
+       overlapping in a pile" renders, because the placement math
+       starts guessing instead of reading dimensions from each builder.
 2. SILHOUETTE · trace the outline from the implied view. Ask: is the
    rim/footprint a circle? If it's almond/vesica/leaf/oval/kidney/
    teardrop/canoe/banana-curve/crescent or any pinched asymmetric
