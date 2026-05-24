@@ -456,9 +456,16 @@ async def main():
         pass
 
     t0 = time.time()
+    # Pass judge URL down: ours uses GLM bracket selection (matches the
+    # validator); leader baseline runner gracefully falls back to critic
+    # if its worktree predates the bracket helper.
     (leader_js, leader_meta), (ours_js, ours_meta) = await asyncio.gather(
-        run_one_subprocess(leader_wt, stem, ref_path, categories=cats),
-        run_one_subprocess(ours_wt, stem, ref_path, categories=cats),
+        run_one_subprocess(leader_wt, stem, ref_path, categories=cats,
+                            judge_url=args.judge_url, judge_model=args.judge_model,
+                            judge_key=args.judge_key),
+        run_one_subprocess(ours_wt, stem, ref_path, categories=cats,
+                            judge_url=args.judge_url, judge_model=args.judge_model,
+                            judge_key=args.judge_key),
     )
     log.info(f"  generation took {time.time()-t0:.1f}s")
     log.info(f"  leader: status={leader_meta.get('status')} "

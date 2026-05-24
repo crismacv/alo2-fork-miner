@@ -123,6 +123,7 @@ from modules.scene_coder import prompts as _prompts
 from modules.critic.agent import CriticAgent
 from openai import AsyncOpenAI
 import render as render_mod
+import base64, re
 
 OR_BASE = "https://openrouter.ai/api/v1"
 OR_KEY = os.environ["OPENROUTER_API_KEY"]
@@ -131,6 +132,99 @@ MODEL = "qwen/qwen3.5-397b-a17b"
 ENSEMBLE = 6
 MAX_ITER = 2
 STOP_SCORE = 0.85
+
+
+# ---- GLM judge bracket (mirrors validator selection method) ----
+_GLM_SYS = ("You are a specialized 3D model evaluation system.\\n"
+            "Analyze visual quality and prompt adherence with expert precision.\\n"
+            "Always respond with valid JSON only.")
+_GLM_USR = ("You see two 3D models rendered from slightly left of the front.\\n"
+            "The reference image shows the target object.\\n\\n"
+            "Which model is a more faithful 3D reproduction of the reference?\\n\\n"
+            "Penalty 0-10:\\n"
+            "0 = Perfect match\\n3 = Minor issues\\n5 = Moderate issues\\n"
+            "7 = Major issues\\n10 = Completely wrong\\n\\n"
+            'Output: {"penalty_1": <0-10>, "penalty_2": <0-10>, "issues": "<brief>"}')
+_GLM_P  = re.compile(r'"penalty_1"\\s*:\\s*(\\d+).*?"penalty_2"\\s*:\\s*(\\d+)', re.DOTALL)
+_GLM_P2 = re.compile(r'penalty_?1[^0-9]+(\\d+).*?penalty_?2[^0-9]+(\\d+)', re.DOTALL | re.IGNORECASE)
+
+
+def _b64url(b: bytes) -> str:
+    return f"data:image/png;base64,{base64.b64encode(b).decode()}"
+
+
+async def _glm_duel_one(client, model, ref, a, b, seed, swap):
+    A, B = (b, a) if swap else (a, b)
+    try:
+        resp = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": _GLM_SYS},
+                {"role": "user", "content": [
+                    {"type": "text", "text": "Reference image (target object):"},
+                    {"type": "image_url", "image_url": {"url": _b64url(ref)}},
+                    {"type": "text", "text": "3D model 1:"},
+                    {"type": "image_url", "image_url": {"url": _b64url(A)}},
+                    {"type": "text", "text": "3D model 2:"},
+                    {"type": "image_url", "image_url": {"url": _b64url(B)}},
+                    {"type": "text", "text": _GLM_USR},
+                ]},
+            ],
+            max_tokens=2048, temperature=0.0, seed=seed,
+        )
+        text = resp.choices[0].message.content or ""
+        text = re.sub(r"<think>.*?</think>\\s*", "", text, flags=re.DOTALL).strip()
+        m = _GLM_P.search(text) or _GLM_P2.search(text)
+        if not m:
+            return None
+        p1, p2 = int(m.group(1)), int(m.group(2))
+        return (p2, p1) if swap else (p1, p2)
+    except Exception:
+        return None
+
+
+async def glm_duel_3vote(client, model, ref, a, b, base_seed=42):
+    votes = await asyncio.gather(*[
+        _glm_duel_one(client, model, ref, a, b, base_seed + i * 13, bool(i & 1))
+        for i in range(3)
+    ])
+    valid = [v for v in votes if v is not None]
+    if not valid:
+        return None  # judge failure → caller falls back
+    pa = sum(v[0] for v in valid) / len(valid)
+    pb = sum(v[1] for v in valid) / len(valid)
+    return pa, pb  # (penalty_a, penalty_b)
+
+
+async def glm_bracket_pick(client, model, ref, renders, log=None):
+    """Single-elimination tournament. `renders` is list of PNG bytes; returns
+    winning index. Each match is a 3-vote duel. Tied → keep first."""
+    indices = list(range(len(renders)))
+    round_idx = 0
+    while len(indices) > 1:
+        round_idx += 1
+        pairs = []
+        byes = []
+        for i in range(0, len(indices), 2):
+            if i + 1 < len(indices):
+                pairs.append((indices[i], indices[i + 1]))
+            else:
+                byes.append(indices[i])
+
+        async def _match(a, b):
+            r = await glm_duel_3vote(client, model, ref, renders[a], renders[b],
+                                      base_seed=42 + round_idx * 1000 + a * 31 + b)
+            if r is None:
+                return a  # judge fail → keep first
+            pa, pb = r
+            return a if pa <= pb else b
+
+        winners = await asyncio.gather(*[_match(a, b) for a, b in pairs])
+        if log:
+            log.info(f"  bracket R{round_idx}: pairs={pairs} byes={byes} → "
+                     f"winners={winners}")
+        indices = list(winners) + byes
+    return indices[0]
 
 
 async def main():
@@ -142,6 +236,12 @@ async def main():
     p.add_argument("--categories", default="",
                    help="comma-separated category tags from classification; if set, "
                    "the system prompt is pruned to the matching handbooks/few-shot.")
+    p.add_argument("--judge-url", default="",
+                   help="OpenAI-compatible base URL for GLM-4.6V-Flash. If set, "
+                   "candidate selection uses a 3-vote GLM bracket instead of "
+                   "Qwen critic scores (matches the validator's selection method).")
+    p.add_argument("--judge-model", default="zai-org/GLM-4.6V-Flash")
+    p.add_argument("--judge-key", default="local")
     args = p.parse_args()
 
     img = Path(args.ref).read_bytes()
@@ -188,9 +288,13 @@ async def main():
 
     renders = await asyncio.gather(*[render_mod.render_front(c) for _, c in pairs])
     survivors = [(t, c, r) for (t, c), r in zip(pairs, renders) if r is not None]
+    selection_method = "critic"
     if not survivors:
         best_js = pairs[0][1]
         best_score = None
+        best_render = None
+        best_report = None
+        best_tid = pairs[0][0]
     else:
         async def _crit(t, c, r):
             try:
@@ -200,44 +304,92 @@ async def main():
             except Exception as e:
                 log.warning(f"  critic fail: {type(e).__name__}")
                 return None
-        reports = await asyncio.gather(*[_crit(*s) for s in survivors])
-        scored = [(t, c, r, rep) for (t, c, r), rep in zip(survivors, reports) if rep]
-        if not scored:
-            best_js, best_score = survivors[0][1], None
-        else:
-            scored.sort(key=lambda x: -x[3].overall_score)
-            best_tid, best_js, best_render, best_report = scored[0]
-            best_score = best_report.overall_score
-            best_k = int(best_tid.rsplit("-k", 1)[1])
-            if best_k > 0:
-                store.rename_actor(best_tid, f"coder#k{best_k}", "coder")
-            for it in range(MAX_ITER):
-                if best_report.stop or best_report.overall_score >= STOP_SCORE:
-                    break
+
+        # SELECTION: prefer GLM bracket (matches validator) when judge URL
+        # is supplied; fall back to Qwen critic sort otherwise.
+        if args.judge_url.strip() and len(survivors) >= 2:
+            from openai import AsyncOpenAI as _AOC
+            judge_cli = _AOC(base_url=args.judge_url, api_key=args.judge_key, timeout=180)
+            try:
+                ref_bytes = img
+                winner_idx = await glm_bracket_pick(
+                    judge_cli, args.judge_model, ref_bytes,
+                    [s[2] for s in survivors], log=log,
+                )
+                best_tid, best_js, best_render = survivors[winner_idx]
+                # One critic call on the winner just to drive patcher repair
+                # (we still want detailed issues/matching_aspects feedback).
+                best_report = await _crit(best_tid, best_js, best_render)
+                best_score = best_report.overall_score if best_report else None
+                selection_method = "glm_bracket"
+            except Exception as e:
+                log.warning(f"  glm bracket failed: {e}; falling back to critic")
+                args_judge_url = ""
+        if selection_method != "glm_bracket":
+            reports = await asyncio.gather(*[_crit(*s) for s in survivors])
+            scored = [(t, c, r, rep) for (t, c, r), rep in zip(survivors, reports) if rep]
+            if not scored:
+                best_tid, best_js, best_render = survivors[0]
+                best_report, best_score = None, None
+            else:
+                scored.sort(key=lambda x: -x[3].overall_score)
+                best_tid, best_js, best_render, best_report = scored[0]
+                best_score = best_report.overall_score
+
+        # Move winning candidate's session to default "coder" key so patcher
+        # can find it (mirror of original logic).
+        best_k = int(best_tid.rsplit("-k", 1)[1])
+        if best_k > 0:
+            store.rename_actor(best_tid, f"coder#k{best_k}", "coder")
+
+        for it in range(MAX_ITER):
+            if best_report is None:
+                break
+            if best_report.stop or best_report.overall_score >= STOP_SCORE:
+                break
+            try:
+                patched = await coder.code_critic_repair(
+                    task_id=best_tid, image_bytes=img, image_mime="image/png",
+                    render_png=best_render,
+                    overall_score=best_report.overall_score,
+                    issues=best_report.issues,
+                    matching_aspects=best_report.matching_aspects, osd=None)
+            except Exception as e:
+                log.warning(f"  patcher fail: {type(e).__name__}")
+                break
+            new_r = await render_mod.render_front(patched)
+            if new_r is None:
+                continue
+            new_rep = await _crit(best_tid, patched, new_r)
+            if new_rep is None:
+                continue
+            # Adopt patched iff it ALSO wins a GLM duel against the current best
+            # (when bracket is enabled). Otherwise fall back to critic-score
+            # comparison.
+            adopt = False
+            if args.judge_url.strip():
                 try:
-                    patched = await coder.code_critic_repair(
-                        task_id=best_tid, image_bytes=img, image_mime="image/png",
-                        render_png=best_render,
-                        overall_score=best_report.overall_score,
-                        issues=best_report.issues,
-                        matching_aspects=best_report.matching_aspects, osd=None)
-                except Exception as e:
-                    log.warning(f"  patcher fail: {type(e).__name__}")
-                    break
-                new_r = await render_mod.render_front(patched)
-                if new_r is None:
-                    continue
-                new_rep = await _crit(best_tid, patched, new_r)
-                if new_rep is None:
-                    continue
-                if new_rep.overall_score > best_report.overall_score:
-                    best_js, best_render, best_report = patched, new_r, new_rep
-                    best_score = new_rep.overall_score
+                    from openai import AsyncOpenAI as _AOC2
+                    judge_cli2 = _AOC2(base_url=args.judge_url, api_key=args.judge_key, timeout=180)
+                    duel = await glm_duel_3vote(judge_cli2, args.judge_model, img,
+                                                 best_render, new_r,
+                                                 base_seed=42 + it * 7919)
+                    if duel is not None:
+                        pa, pb = duel  # a=current best, b=patched
+                        adopt = (pb < pa - 0.25)  # require small clear edge
+                except Exception:
+                    adopt = (new_rep.overall_score > best_report.overall_score)
+            else:
+                adopt = (new_rep.overall_score > best_report.overall_score)
+            if adopt:
+                best_js, best_render, best_report = patched, new_r, new_rep
+                best_score = new_rep.overall_score
 
     Path(args.out_js).write_text(best_js)
     Path(args.out_meta).write_text(json.dumps({
         "status": "ok", "best_score": best_score, "dt": time.time() - t0,
         "n_ensemble": len(pairs), "n_survivors": len(survivors),
+        "selection_method": selection_method,
     }))
     print("OK")
 
@@ -261,7 +413,10 @@ def ensure_worktree(commit_ref: str) -> Path:
 
 
 async def run_one_subprocess(work_dir: Path, stem: str, ref_path: Path,
-                              categories: list[str] | None = None) -> tuple[str | None, dict]:
+                              categories: list[str] | None = None,
+                              judge_url: str | None = None,
+                              judge_model: str = "zai-org/GLM-4.6V-Flash",
+                              judge_key: str = "local") -> tuple[str | None, dict]:
     out_js = Path(f"/tmp/gen_{work_dir.name}_{stem}.js")
     out_meta = Path(f"/tmp/gen_{work_dir.name}_{stem}.json")
     cmd = [
@@ -271,6 +426,10 @@ async def run_one_subprocess(work_dir: Path, stem: str, ref_path: Path,
     ]
     if categories:
         cmd += ["--categories", ",".join(categories)]
+    if judge_url:
+        cmd += ["--judge-url", judge_url,
+                "--judge-model", judge_model,
+                "--judge-key", judge_key]
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         cwd=str(work_dir),
