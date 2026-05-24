@@ -23,7 +23,13 @@ from PIL import Image
 
 log = logging.getLogger("multi_view")
 
-CHUTES_KEY = os.environ.get("CHUTES_API_KEY", "")
+# .env had Korean characters accidentally appended to the API key. Strip
+# anything non-ASCII / not-allowed-in-token so the Authorization header
+# is encodable. Token format is `cpk_<hex32>.<hex32>.<base62 32>`.
+import re as _re
+_raw_key = os.environ.get("CHUTES_API_KEY", "")
+_m = _re.match(r"cpk_[A-Za-z0-9]+\.[A-Za-z0-9]+\.[A-Za-z0-9]+", _raw_key)
+CHUTES_KEY = _m.group(0) if _m else "".join(c for c in _raw_key if ord(c) < 128).strip()
 ENDPOINT = os.environ.get(
     "QWEN_EDIT_URL",
     "https://chutes-qwen-image-edit-2511.chutes.ai/generate",
