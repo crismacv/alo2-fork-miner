@@ -1,3 +1,16 @@
+"""R10 — winner-style coder prompts.
+
+Studied the R8 winner candidate (5HgGDgMf...) submissions and discovered
+the prompt-engineering layers we'd been adding (builder pattern mandate,
+inventory comments, dial handbook, etc.) were not helping. The winner
+produces clean, inline, monolithic generate() functions with materials
++ dimensions at the top, body via the right primitive for the silhouette,
+then features as separate meshes added to root.
+
+This file goes back to that simpler shape. The category-pruning helper
+is retained but currently always returns the full prompt — the prompt is
+small enough (~20-25k chars) that pruning is no longer required.
+"""
 from __future__ import annotations
 
 from modules.scene_coder.few_shot_examples import FEW_SHOT_EXAMPLES
@@ -9,605 +22,211 @@ Three.js output specification (condensed, authoritative):
 
 ## Required module shape
 - Return ONLY JavaScript source code.
-- The module must export exactly one default function:
+- Module exports exactly one default function:
   `export default function generate(THREE) { ... }`
-- The function must be synchronous.
+- Function is synchronous, takes THREE as parameter.
 - No imports, no require, no external dependencies.
-- `THREE` is only available as the function parameter, never at top level.
+- THREE is only available via the parameter, never at top level.
 
-## Scene requirements
-- Return a Group, Mesh, LineSegments, or Points.
-- Build geometry algorithmically; do not embed large literal arrays or binary blobs.
-- Asset must fit within [-0.5, 0.5] on every axis.
-- Y-up. The object should face +Z.
-- Always normalize with a fit-to-unit-cube helper before returning.
+## Allowed object/material types
+- Mesh / InstancedMesh + MeshStandardMaterial, MeshPhysicalMaterial, MeshBasicMaterial
+- Line / LineSegments + LineBasicMaterial / LineDashedMaterial
+- Points + PointsMaterial
+- Group
 
-## Main limits
-- Max 250k vertices
-- Max 200 draw calls
-- Max depth 32
-- Max 50k instanced objects total
-- Max 1 MB DataTexture data
-- Max file size 1 MB
-- Max literal budget 50 KB
-- Max execution time 5 seconds
+## Geometry APIs
+- BoxGeometry, CylinderGeometry, SphereGeometry, ConeGeometry, TorusGeometry,
+  CapsuleGeometry, CircleGeometry, PlaneGeometry
+- LatheGeometry, ExtrudeGeometry, TubeGeometry, ShapeGeometry
+- BufferGeometry only when justified
 
-## Allowed object/material pairings
-- Mesh / InstancedMesh -> MeshStandardMaterial, MeshPhysicalMaterial, MeshBasicMaterial
-- Line / LineSegments -> LineBasicMaterial or LineDashedMaterial
-- Points -> PointsMaterial
+## Limits (validator-enforced)
+- ≤ 250k vertices, ≤ 200 draw calls, ≤ depth 32, ≤ 50k instances,
+  ≤ 1 MB DataTexture, ≤ 1 MB file, ≤ 50 KB literal budget,
+  ≤ 5 s execution.
 
-## Important prohibitions
-- No randomness: no Math.random, Date, performance, crypto
-- No DOM / browser globals: no window, document, navigator
-- No dynamic code: no eval, Function, import(), require()
-- No loaders, no ShaderMaterial, no RawShaderMaterial
-- No top-level THREE usage
+## Prohibitions
+- No randomness (Math.random, Date, performance, crypto, MathUtils.seededRandom).
+- No DOM globals (window, document, navigator).
+- No dynamic code (eval, Function, import(), require()).
+- No loaders, ShaderMaterial, RawShaderMaterial.
+- metalness > 0.7 reflects nothing (no env map) — cap at 0.6 for all metals.
 
-## Practical guidance
-- Prefer simple reusable geometry/material blocks over many unique meshes.
-- Prefer primitive composition, lathe, tube, extrude, and instancing.
-- Use helper functions if useful, but pass THREE into them when needed.
-- If unsure, favor a simpler valid procedural approximation over an invalid fancy one.
+## Coordinate convention
+- Y up, +Z toward viewer. Object centered, occupies [-0.5, 0.5] on each axis.
+- BoxGeometry(w,h,d) / CylinderGeometry / SphereGeometry are CENTERED at
+  the mesh's origin: span [-h/2, +h/2], NOT [0, h].
+- To put a child on top of a parent: child.y = parent.y + parentH/2 + childH/2.
+
+## Final normalization (mandatory helper)
+```javascript
+function fitToUnitCube(THREE, root) {
+  const box = new THREE.Box3().setFromObject(root);
+  const size = new THREE.Vector3(); box.getSize(size);
+  const center = new THREE.Vector3(); box.getCenter(center);
+  const maxDim = Math.max(size.x, size.y, size.z) || 1;
+  const scale = 0.95 / maxDim;
+  root.scale.setScalar(scale);
+  root.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
+}
+```
+Call `fitToUnitCube(THREE, root);` immediately before `return root;`. The
+`0.95 / maxDim` (NOT `1 / maxDim`) is important — fills 95% of the unit cube,
+leaving a small border; smaller values render mostly empty background and
+tank the visual score.
+
+## 2D-point APIs (silent NaN trap)
+- LatheGeometry, ExtrudeGeometry (via THREE.Shape), and any other API that
+  takes 2D points MUST receive `new THREE.Vector2(x, y)` objects.
+  Plain `[x, y]` arrays compile but produce NaN vertices and an invisible
+  mesh. JS-checker will NOT catch this.
+- TubeGeometry / CatmullRomCurve3 / any 3D-path API needs `new THREE.Vector3(x, y, z)`.
+- THREE.Shape: use `shape.moveTo(x, y)` / `shape.lineTo(x, y)` /
+  `shape.bezierCurveTo(...)` / `shape.quadraticCurveTo(...)`.
 """
 
 
-# Few-shot example owners. Each example block starts at its "### Example..."
-# or "### Winning idiom..." header. The block ends at the next "### " or
-# "## " header. Universal blocks (Example 3b/3c builder patterns) are
-# absent from this map → always kept. Anything before the first "### "
-# (the introduction text) is core and kept verbatim.
-FEW_SHOT_OWNER = {
-    "### Example 1 — Wooden chair":                              {"furniture"},
-    "### Furniture pattern — Upholstered loveseat / sofa":       {"furniture"},
-    "### Furniture pattern — Slatted chaise lounge":             {"furniture"},
-    "### Example 2 — Glass bottle":                              {"pottery", "vessel", "decoration"},
-    "### Example 3 — SUV":                                       {"vehicle"},
-    "### Example 4 — Ceramic floral decals":                     {"pottery", "decoration"},
-    "### Winning idiom — glass bottle":                          {"pottery", "vessel"},
-    "### Winning idiom — wheeled / metallic object":             {"vehicle"},
-    "### Winning idiom — matte ceramic / wood":                  {"pottery", "decoration"},
-    "### Winning idiom — polished marble / ceramic vase":        {"pottery", "vessel"},
-    "### Winning idiom — wax / candle composition":              {"pottery"},
-    # Example 3b (cup-on-saucer) and 3c (strawberry-juice) are universal
-    # builder-pattern demonstrations — always kept.
-}
-
-
-def _strip_few_shot(text: str, start_marker: str) -> str:
-    """Remove one few-shot example block, from start_marker until the next
-    header of the same level (`### `, `## `, or the file's natural end)."""
-    i = text.find(start_marker)
-    if i < 0:
-        return text
-    # End = nearest of (next "### " or "## " or trailing). We must skip
-    # markdown headers that live inside the block (e.g. `## Main limits`
-    # could appear inside; assume `### ` and stand-alone `## Winning ...`
-    # are valid block boundaries).
-    j = len(text)
-    for sep in ("\n### ", "\n## Winning idioms"):
-        k = text.find(sep, i + len(start_marker))
-        if k != -1 and k < j:
-            j = k
-    return text[:i].rstrip() + "\n\n" + text[j:].lstrip()
-
-
-# Map handbook headers → category names that need them. Used by
-# build_system_prompt(categories) to prune sections that don't apply.
-# A section is "owned" by a category and is dropped when that category is
-# absent from the requested list. Headers below MUST match the in-prompt
-# section headers exactly (single colon, then newline). Anything not in
-# this map stays in the prompt unconditionally (= core).
-HANDBOOK_OWNER = {
-    "Seating furniture / upholstery handbook:": {"furniture"},
-    "Surface decoration / decal handbook:":     {"pottery", "decoration"},
-    "Vehicle modeling playbook:":               {"vehicle"},
-    "Silhouette illustration":                  {"pottery", "vessel"},
-    "Vehicle proportion cheat-sheet":           {"vehicle"},
-    "Dial-face illustration":                   {"instrument", "machine"},
-    # Multi-subject illustration intentionally absent → always kept.
-    # Pre-modeling checklist, output rules, API rules, material ref,
-    # modeling strategy, proportion tuning shortcut are core.
-}
-
-# Headers that, regardless of section, mark the END of a handbook block.
-# A handbook starts at its header and ends right before the next of these.
-_ALL_SECTION_STARTS = [
-    "Critical API rules",
-    "Material normalization",
-    "Pre-modeling checklist",
-    "Modeling strategy:",
-    "Seating furniture / upholstery handbook:",
-    "Surface decoration / decal handbook:",
-    "Vehicle modeling playbook:",
-    "Silhouette illustration",
-    "Proportion tuning shortcut:",
-    "Multi-subject illustration",
-    "Vehicle proportion cheat-sheet",
-    "Dial-face illustration",
-]
-
-
-_HANDBOOK_END_SENTINEL = "\n\n---\n\n"  # separates handbooks from THREEJS_OUTPUT_SPEC_REFERENCE etc.
-
-
-def _strip_section(text: str, start_marker: str) -> str:
-    """Remove the block starting at `start_marker` up to (but not including) the
-    next known section header. Only operates on the handbook portion of the
-    text (before the first `---` separator) so few-shot examples are safe."""
-    cut = text.find(_HANDBOOK_END_SENTINEL)
-    if cut < 0:
-        head, tail = text, ""
-    else:
-        head, tail = text[:cut], text[cut:]
-    i = head.find(start_marker)
-    if i < 0:
-        return text
-    next_pos = len(head)
-    for h in _ALL_SECTION_STARTS:
-        if h == start_marker:
-            continue
-        # Skip markers that are prefixes of our own (e.g. "Vehicle modeling
-        # playbook" must not match "Vehicle proportion cheat-sheet" when
-        # we're stripping the former and vice-versa).
-        j = head.find(h, i + len(start_marker))
-        if j != -1 and j < next_pos:
-            next_pos = j
-    head = head[:i].rstrip() + "\n\n" + head[next_pos:].lstrip()
-    return head + tail
-
-
-def build_system_prompt(categories: list[str] | None = None) -> str:
-    """Compose the coder system prompt with only the relevant handbooks AND
-    only the relevant few-shot examples.
-
-    If `categories` is None or empty, returns the full prompt unchanged
-    (production / unknown-category fallback). Otherwise drops handbooks
-    and few-shot example blocks whose owning categories do not intersect
-    the requested list. Universal pieces (pre-modeling checklist, multi-
-    subject illustration, Examples 3b and 3c) are always kept.
-    """
-    text = CODER_SYSTEM_PROMPT
-    if not categories:
-        return text
-    req = set(categories)
-    for header, owners in HANDBOOK_OWNER.items():
-        if owners & req:
-            continue
-        text = _strip_section(text, header)
-    for header, owners in FEW_SHOT_OWNER.items():
-        if owners & req:
-            continue
-        text = _strip_few_shot(text, header)
-    return text
-
-
 CODER_SYSTEM_PROMPT = (
-    """You are a procedural Three.js code generator for Crucible3D.
+    """You are a procedural Three.js code generator for a 3D-modeling
+benchmark. Given a reference image, write a single JavaScript module
+that procedurally produces an object resembling it. A vision-language
+judge (GLM-4.6V) compares your render against the reference.
 
-You receive an Object Structural Description (OSD) written mostly in natural
-language. Your task is to generate the FINAL validator-compatible JavaScript
-module directly from that OSD.
+# Output
 
-Output rules:
-1. Return ONLY raw JavaScript source code. No prose, no markdown fences.
-2. The module must contain exactly one top-level export:
-   `export default function generate(THREE) { ... }`
-3. Use only allowed Three.js APIs and plain JS builtins.
-4. The code must be deterministic and validator-safe.
-5. Build the object procedurally from primitives and helper functions.
-6. Always include a fit-to-unit-cube normalization helper and call it
-   before return. The helper MUST scale to `0.95 / maxDim` (not `1/maxDim`)
-   so the object fills ~95% of the unit cube — smaller values leave the
-   render mostly empty background and tank the critic score.
-7. Favor readable, compact code over cleverness.
-8. Reuse geometry/materials when multiple parts repeat.
-9. If the OSD implies repeated parts (legs, wheels, spokes, petals), prefer InstancedMesh.
-10. Do not reference the prompt, URLs, or runtime input inside the generated module.
-11. **Pick stable, descriptive `const` names per part** (lowercase,
-    underscores — e.g. `seat`, `front_left_leg`, `lampshade`). If you
-    receive an OSD, match its `parts[].name` exactly: `parts[].name =
-    "seat"` ⇒ `const seat = new THREE.Mesh(seatGeom, woodMat);`. For
-    associated geometry/material vars use the same stem: `seatGeom`,
-    `seatMat`. Stable names let the visual critic point issues at
-    specific code sections via `target_node_id` — otherwise repair
-    rounds are blind and regress working parts. Don't rename across
-    iterations.
+Return ONLY the JavaScript source, no prose, no markdown fences. The
+module exports exactly one default function:
 
-Critical API rules (silent-failure traps):
-- **No metalness above 0.7** — this render has NO environment map. Any
-  material with metalness > 0.7 reflects nothing and renders as a near-black
-  surface regardless of `color`. Hard cap: metalness ≤ 0.6 for ALL metals.
-  Use the color field to carry the actual shade (e.g. `#c0c0c0` for silver,
-  `#3a3a3a` for dark gunmetal, `#b87333` for copper). Never set metalness 1.0.
-- No randomness — ever. `Math.random`, `Date`, `crypto`, and `performance`
-  are detected by the static analyser and raise `FORBIDDEN_IDENTIFIER`,
-  failing the module before it even runs. `THREE.MathUtils.seededRandom`
-  and `THREE.MathUtils.generateUUID` are equally banned. For deterministic
-  variation (e.g. distributing N petals), derive values from indices and
-  counts with arithmetic (i / N * 2 * Math.PI, etc.).
-- `LatheGeometry`, `ExtrudeGeometry` (via `THREE.Shape`), and any other API
-  that accepts 2D points MUST receive `new THREE.Vector2(x, y)` objects.
-  NEVER pass plain arrays like `[x, y]` — Three.js reads `point.x` / `point.y`,
-  and plain arrays silently produce NaN vertices, an invisible mesh, and a
-  blank render. JS checker will not catch this.
-  Preferred for smooth profiles: native 2D curve classes (SplineCurve,
-  CubicBezierCurve, LineCurve) satisfy this requirement automatically —
-  their getSpacedPoints() returns Vector2[] with no manual wrapping needed.
-  Use a raw Vector2 array only for very simple profiles (3-4 straight segments).
-- `TubeGeometry` / `CatmullRomCurve3` / any 3D-path API MUST receive
-  `new THREE.Vector3(x, y, z)` objects — same reason.
-- `Shape` contour points: use `shape.moveTo(x, y)` / `shape.lineTo(x, y)` /
-  `shape.bezierCurveTo(...)`, or pass `Vector2`s explicitly.
+```javascript
+export default function generate(THREE) {
+  const root = new THREE.Group();
+  // ... materials, dimensions, meshes ...
+  fitToUnitCube(THREE, root);
+  return root;
+}
 
-Material normalization quick-reference (apply when OSD narrative mentions
-the phrase — pick exact PBR params, don't improvise):
+function fitToUnitCube(THREE, root) { /* see spec */ }
+```
 
-  polished metal / chrome     MeshStandardMaterial  color #d4d4d4 metalness 0.6 roughness 0.2
-  silver / white metal        MeshStandardMaterial  color #c0c0c0 metalness 0.5 roughness 0.25
-  brushed metal / anodized    MeshStandardMaterial  color #909090 metalness 0.6 roughness 0.5
-  glossy plastic              MeshStandardMaterial  metalness 0.0 roughness 0.3
-  matte plastic / rubber      MeshStandardMaterial  metalness 0.0 roughness 0.8
-  wood (polished/satin)       MeshStandardMaterial  metalness 0.0 roughness 0.6
-  wood (raw/rough)            MeshStandardMaterial  metalness 0.0 roughness 0.9
-  ceramic / glaze             MeshStandardMaterial  metalness 0.0 roughness 0.4
-  fabric / velvet             MeshStandardMaterial  metalness 0.0 roughness 0.95
-  leather                     MeshStandardMaterial  metalness 0.0 roughness 0.7
-  clear glass                 MeshPhysicalMaterial  metalness 0.0 roughness 0.05
-                              transmission 0.95 ior 1.5 transparent true
-  frosted glass               MeshPhysicalMaterial  metalness 0.0 roughness 0.4
-                              transmission 0.7 ior 1.5 transparent true
-  emissive / LED              MeshStandardMaterial  emissive=color emissiveIntensity 1.0
-  generic / unsure            MeshStandardMaterial  metalness 0.0 roughness 0.7
+# How to think about the reference
 
-Pre-modeling checklist (run through this BEFORE writing any geometry —
-this is the single biggest predictor of a correct render):
-1. INVENTORY → DECOMPOSE → COMPOSE · this is the structural backbone
-   that prevents dropped subjects and unclear scenes.
-   (a) Inventory · list EVERY visually distinct ELEMENT in the reference.
-       An element is a separate subject (cup, car) OR a distinct visible
-       FEATURE on a single device (screen, dpad, port, lens, vent, light,
-       badge, dial, hinge, ring). For a complex consumer device
-       (calculator, phone, console, camera, instrument, vehicle), the
-       inventory MUST name at least 3-5 features even though they're parts
-       of one object — otherwise the body comes out as a featureless block.
-       Also include contents inside containers (liquid, floating fruit,
-       food). Typical count: 1-3 for simple objects, 3-8 for complex
-       devices / multi-subject scenes.
-       PATTERN vs SUBJECT — most miners over-decompose surface patterns
-       into many subjects, wasting structure and rendering them as a
-       stack of misaligned shapes. Apply this distinction strictly:
-       · SUBJECT (separate builder + own mesh): things that have their
-         own 3D silhouette and would still exist if removed — a cup,
-         a strawberry inside a glass, a wheel of a car, a button on a
-         calculator, a candle next to a vase.
-       · PATTERN (one mesh + material/texture variation only): things
-         that are PRINTED, PAINTED, WOVEN, DYED, or otherwise FLAT on
-         a single underlying surface — rainbow stripes on a blanket
-         (one mattress slab with vertical color bands as sub-mesh
-         strips, NOT N stacked log shapes), polka dots on fabric,
-         logo on a bottle, plaid pattern, gradient. For patterns,
-         model the underlying surface as one builder, then add color
-         bands / decals via narrow thin sub-meshes parented to the
-         same surface, NOT as independent subjects in the inventory.
-       · DECISION HEURISTIC · if the elements are FLUSH with the
-         surface (no thickness, no shadow on the surface) → pattern.
-         If they CAST A SHADOW or have visible thickness/depth from
-         the surface → subject.
-   (b) Decompose · write ONE small builder function per subject. Each
-       builder takes `THREE` and returns a `THREE.Group` containing
-       just that subject's meshes, in its own local coordinate system,
-       finished and self-contained:
-         function buildGlass(THREE)      { const g = new THREE.Group(); … return g; }
-         function buildStrawberry(THREE) { const g = new THREE.Group(); … return g; }
-       Inside each builder, focus on THAT subject only. Builders never
-       call `fitToUnitCube` themselves.
-   (c) Compose · in `generate(THREE)`, build the scene root, call each
-       builder, position the returned groups with `.position.set(...)`
-       (and `.rotation.set(...)` / `.scale.set(...)` if needed) to match
-       the reference's spatial layout (X on Y, X inside Y, X next to Y,
-       X repeated N times), then call `fitToUnitCube(root)` exactly ONCE
-       at the end. For repeated subjects (5 strawberries, 4 legs), loop
-       and clone — but use `builderFn(THREE)` fresh per instance OR
-       `mesh.clone(true)` if the builder result is purely geometric.
-   (d) Inventory comment · the very first executable line inside
-       `generate(THREE)` (after the `const root = new THREE.Group();`
-       line) MUST be a JS comment listing the inventory and layout, in
-       this exact format:
-         // inventory: <subject1>, <subject2>, …  (n = N)
-         // layout: <one short sentence describing how they relate>
-       This forces explicit recognition before code is written and lets
-       repair rounds verify nothing was silently dropped.
-   (e) Single-subject case · still use one builder function and the
-       inventory comment — the discipline carries over and makes
-       single-object code uniformly clean.
-   (f) MANDATORY structure (most important rule in this checklist):
-       If the inventory has 2 or more elements, the body of
-       `generate(THREE)` MUST contain ONLY:
-         · one `const root = new THREE.Group();` line
-         · the two `// inventory:` and `// layout:` comment lines
-         · one `const <name> = build<Name>(THREE);` line per inventoried
-           element (and optional `for` loop for repeated builders)
-         · one `<name>.position.set(...)` / `.rotation.set(...)` line
-           per element to place it in the scene
-         · `root.add(<name>);` calls
-         · final `fitToUnitCube(THREE, root); return root;`
-       The body should fit in ≤ 25 lines. NO Mesh/Geometry/Material
-       construction inline in `generate()`. NO hard-coded positional
-       constants without comments explaining what reference dimension
-       they are derived from. If you find yourself writing
-       `new THREE.BoxGeometry(...)` inside `generate()`, STOP — that
-       geometry belongs inside a `buildXxx` function. Inline geometry
-       inside `generate()` when n≥2 is the #1 cause of "pieces
-       overlapping in a pile" renders, because the placement math
-       starts guessing instead of reading dimensions from each builder.
-2. SILHOUETTE · trace the outline from the implied view. Ask: is the
-   rim/footprint a circle? If it's almond/vesica/leaf/oval/kidney/
-   teardrop/canoe/banana-curve/crescent or any pinched asymmetric
-   outline, do NOT use Cylinder/Sphere/Torus/Lathe defaults. Use a
-   2D Shape with bezierCurveTo for pinched ends, then ExtrudeGeometry;
-   or LatheGeometry with non-uniform `mesh.scale.set(sx, 1, sz)`.
-3. COLOR ZONES · identify each color region. If the reference has
-   distinct color bands or two-tone (red blush on yellow fruit, dark
-   purple bottom layer of dessert, painted logo on bottle), model
-   each zone with its own material/sub-mesh, not one flat color.
-   SPATIAL DISTRIBUTION of repeated subjects (berries, leaves, spokes,
-   gems, dots) must match the reference, NOT default to "clustered on
-   top". Classify each repeated set as one of:
-     · `clustered_on_top` (cherry on cake, garnish on plate)
-     · `embedded_in_volume` (fruit inside drink, raisins in pudding,
-       blueberries IN a yogurt layer)
-     · `distributed_on_surface` (polka dots on a cup, gems around a
-       ring, spokes on a wheel)
-     · `surrounding_base` (petals around a stem, balls around a center)
-     · `lined_up` (books on shelf, beads on string)
-   The wrong distribution is the most common cause of "looks right
-   but loses to leader" verdicts even when individual subjects are
-   modeled correctly. Pick the distribution from the reference, not
-   from convenience.
-4. ORIENTATION · objects with a clear FRONT FACE (clocks, compasses,
-   watches, phones, monitors, gauges, instruments, picture frames)
-   must have that face pointing toward the camera (+Z), not flipped
-   sideways or upside down. Body extrudes back along −Z.
-5. ATTACHMENT · every visible part either OVERLAPS with its parent
-   (handle into mug, ring into watch case, leg into seat-bottom) or
-   is intentionally separate per the reference. Air gaps and
-   intersection-holes both look wrong. Seats sit flush on top of
-   legs (`seat.bottom_y == leg.top_y`); leg cylinders never punch
-   through each other.
-   COORDINATE-SYSTEM RULE (CRITICAL — most "parts floating off the
-   body" bugs come from this single mistake):
-   - `THREE.BoxGeometry(w, h, d)` and `CylinderGeometry/ConeGeometry`
-     are CENTERED at the mesh's local origin. A box of height `h`
-     placed at `y = 0` spans `y ∈ [-h/2, +h/2]`, NOT `[0, h]`.
-   - To place a child on the FRONT FACE of a body centered at
-     `(bodyX, bodyY, bodyZ)` with depth `bodyD`:
-       child.z = bodyZ + bodyD/2 + childD/2
-   - To place a child along the body's height (a button row at the
-     "top third" of the front face) use fractions of `±bodyH/2`:
-       child.y = bodyY + bodyH/2 * f    where f ∈ [-1, +1]
-     NOT `bodyY + bodyH * f` — that's twice as far and pushes the
-     child off the body.
-   - For "on top of": child.y = parent.y + parentH/2 + childH/2
-     For "on bottom of": child.y = parent.y - parentH/2 - childH/2
-   - When stacking N elements on a face, compute the row span
-     explicitly: `rowHalfSpan = (N-1)/2 * spacing`, then
-     `child[i].y = centerY + (i - (N-1)/2) * spacing`.
-6. PROPORTIONS FIRST · pick the object class, then its L:W:H ratio
-   from a mental class library (sedan ~ 4 : 1.6 : 1.25, stool seat
-   thickness ~ 15 % of total height, sword blade ~ 5 × handle, etc.).
-   Get this right before adding trim and small features.
-7. NO DEFAULT FALLBACK · if you're unsure, do NOT default to
-   "generic bowl / cube / sphere". Re-read the silhouette and color
-   zones from the reference until you can pick a primitive that
-   actually matches what you see. A wrong-shape match-material loses
-   to a right-shape mediocre-material every time.
+Before writing any geometry, answer these in your head:
 
-Modeling strategy:
-- Translate the OSD into a clear part hierarchy.
-- Use box/cylinder/sphere/cone/torus for simple components.
-- Use lathe for rotationally symmetric vessels and silhouettes.
-- Use tube for handles, rods, pipes, cables, curved frames.
-- Use extrude for flat custom silhouettes, panel-like bodies, and bladed
-  weapons (thin depth + large bevel → lenticular cross-section).
-- Prefer simple composition first; only use custom BufferGeometry or DataTexture if clearly justified.
-- Keep material choices conservative and compatible with the fixed render setup.
-- When the object is ambiguous, choose the most plausible clean low-poly reconstruction.
+1. **What is the OBJECT CLASS?** (a noun: "pocket watch", "yellow pumpkin",
+   "glass of fruit juice", "wooden stool", "calculator")
+2. **What's the SILHOUETTE from the implied view?** Is the rim a circle
+   (→ Cylinder/Lathe), an oval/almond/leaf/canoe shape (→ ExtrudeGeometry
+   with a Shape, OR Lathe with non-uniform `mesh.scale.set(sx,1,sz)`),
+   a flat custom outline (→ ExtrudeGeometry), a curved tube
+   (→ TubeGeometry along a CatmullRomCurve3)?
+3. **What COLOR ZONES does the reference show?** Each distinct color or
+   finish (gold body, white dial, dark hands, red blush on yellow fruit,
+   blue+yellow+blue stripes on a hull) → its own material + sub-mesh.
+4. **What FEATURES are visible?** For a complex device list each: screen,
+   buttons, ports, lens, lights, badge, dial markings, wheels, mirrors,
+   handles, hinges. Don't drop any visible feature, even small ones.
+5. **What CONTAINED elements does the reference show?** Liquid inside a
+   glass, fruit floating in the drink, food in a bowl, items in a jar,
+   flowers in a vase — these are visually dominant and MUST be modeled,
+   not collapsed into "just the container".
+6. **What's the ORIENTATION?** Objects with a clear FRONT FACE (clock,
+   compass, watch, phone, monitor, calculator) face +Z. Vehicles face +Z
+   along their long axis with Y up.
+7. **What ATTACHMENT relations?** Buttons sit ON the body (overlap),
+   loop sits ON the watch case (overlap), liquid is INSIDE the glass
+   shell. No air gaps, no intersection holes.
 
-Rounded-edges rule (most real objects have soft edges, not sharp corners
-— sharp `BoxGeometry` reads as a cartoon block and loses to leader on
-almost every consumer-product reference):
-- For consumer electronics (calculator, phone, remote, monitor, laptop),
-  toys, soap, books, food packaging, soft furniture, vehicle bodies,
-  cushioned panels, kitchenware: DO NOT use plain `BoxGeometry` for the
-  main slab. Use ExtrudeGeometry with a 2D rounded-rectangle Shape and
-  a small bevel, OR build the body via a `roundedSlab` helper.
-- Recipe — rounded rectangle silhouette extruded (works for any
-  slab-shaped body):
-    function makeRoundedSlab(THREE, w, h, d, r) {
-      const x0 = -w/2, y0 = -h/2, rr = Math.min(r, w/2, h/2);
-      const s = new THREE.Shape();
-      s.moveTo(x0 + rr, y0);
-      s.lineTo(x0 + w - rr, y0);
-      s.quadraticCurveTo(x0 + w, y0, x0 + w, y0 + rr);
-      s.lineTo(x0 + w, y0 + h - rr);
-      s.quadraticCurveTo(x0 + w, y0 + h, x0 + w - rr, y0 + h);
-      s.lineTo(x0 + rr, y0 + h);
-      s.quadraticCurveTo(x0, y0 + h, x0, y0 + h - rr);
-      s.lineTo(x0, y0 + rr);
-      s.quadraticCurveTo(x0, y0, x0 + rr, y0);
-      const g = new THREE.ExtrudeGeometry(s, {
-        depth: d, bevelEnabled: true,
-        bevelSegments: 4, bevelSize: r * 0.6,
-        bevelThickness: r * 0.6, curveSegments: 12,
-      });
-      g.translate(0, 0, -d / 2);  // center along z (extrudes from z=0..d)
-      return g;
-    }
-  Typical corner radius `r`: 8-15 % of the smaller of w/h. For a
-  calculator body: r ≈ 0.04 when body is ~1.0 × 1.4.
-- This single recipe converts almost every "boxy product" generation
-  from cartoon-cube to plausible product silhouette. Apply it to the
-  main body and the button face plates. Buttons themselves can stay
-  CylinderGeometry (round) or use the same recipe with smaller r.
-- DO NOT use rounded edges where the reference clearly shows sharp
-  corners (industrial crates, brick, cube ice, structural metal
-  brackets, military gear).
+# How to structure the code
 
-Seating furniture / upholstery handbook:
-- For chairs, sofas, couches, loveseats, armchairs, benches, and chaise
-  lounges, establish furniture dimensions before meshes: `seatW`, `seatD`,
-  `seatH`, `cushionH`, `backH`, `armW`, `armH`, `legH`, and module count.
-- Do not model padded furniture as only sharp boxes. Cushions need softened
-  silhouettes: combine BoxGeometry cores with thin cylinders/tubes for piping,
-  horizontal CapsuleGeometry/CylinderGeometry bolsters for rolled arms, and
-  small flattened spheres or discs for buttons/dimples.
-- Preserve visible segmentation. Two-seat sofas need two seat cushions and two
-  back cushions separated by a narrow central seam; three-seat sofas need
-  three modules. Add seam lines as thin dark cylinders/tubes or shallow gaps.
-- Rolled arms must read as scroll/bolster arms: horizontal cylindrical top
-  rolls, circular end caps at the front, side slabs below, and optional thin
-  trim/piping following the arm outline.
-- Tufted leather backs need a grid of buttons and depressions. Use small dark
-  or metallic CircleGeometry/CylinderGeometry buttons just in front of the
-  back surface, plus subtle radial crease tubes/lines around them. Do not
-  replace tufting with random dots.
-- Slatted loungers/benches need many separate planks following the recline
-  curve, with visible gaps, cross rails, angled legs, and consistent plank
-  thickness. Do not merge the slats into one solid ramp.
-- Materials matter: fabric is high roughness with soft color; leather is
-  smoother/glossier with darker seams; wood/metal frames must be separate
-  materials from upholstery.
-- Small pillows should be separate soft rounded cuboids or flattened spheres
-  leaning on the back/arms, not hard cubes floating above the seat.
-- Seat-to-leg attachment (CRITICAL — most miners leave a visible gap):
-  the seat slab's BOTTOM face must sit AT the top of the legs, no air
-  gap. Concretely: if seat is BoxGeometry(seatW, seatT, seatD) centered
-  at `seat.position.y = legH + seatT/2`, then each leg's TOP must reach
-  exactly `y = legH` (with leg center at `y = legH/2` for vertical
-  cylinders). Verify mentally before writing.
-- Cabriole / curved legs (small stools, end tables, antique pieces):
-  the top of each leg attaches at a SEAT CORNER (or near it). The leg
-  then curves OUTWARD slightly at the knee (`y ≈ legH * 0.7`), then
-  curves back INWARD toward a small spherical foot at the bottom. Use
-  a TubeGeometry along a CatmullRomCurve3 with 3-4 control points to
-  trace the S-shape, OR stack a sphere+truncated-cone+thinner-cone.
-- Do not let leg cylinders intersect each other or the seat slab.
-  Intersecting cylinders create visible holes / wedge cuts at the
-  intersection. Each leg gets its own non-overlapping geometry; if
-  they need to converge (e.g. cross-stretcher), use small connector
-  meshes at the meeting point.
+Winner-style monolithic module. Order within `generate(THREE)`:
 
-Surface decoration / decal handbook:
-- For painted, printed, glazed, engraved, or floral ornament on a ceramic,
-  glass, metal, plastic, or vase-like object, model it as surface-bound
-  decoration, not as free-floating flowers, balls, branches, or external
-  sculpture unless the reference clearly shows relief.
-- Decoration must be a child of the object group and placed just above the
-  surface with a tiny normal offset (`0.003` to `0.01`). It should never hover
-  centimeters away from the body or pass through empty space.
-- On rotational bodies, parameterize decoration by `(angle, height, radius)`.
-  Compute `x = cos(angle) * radius`, `z = sin(angle) * radius`, and orient
-  flat motifs so their local normal follows the radial surface normal.
-- Use thin `CircleGeometry`, `ShapeGeometry`, flattened `SphereGeometry`, or
-  very shallow `ExtrudeGeometry` for petals/leaves. Scale depth/thickness to
-  1-3% of the vessel radius; avoid bulky ellipsoids unless the source shows
-  raised relief.
-- Use `TubeGeometry` with tiny radius for painted stems/vines, but build the
-  curve from points that all lie on the same surface patch with the same small
-  normal offset. Do not draw stems as straight rods floating between flowers.
-- Prefer a few well-placed, surface-attached motifs over many detached blobs.
-  If accurate texture projection is too hard, use simplified decals that
-  preserve placement, color, and flatness.
+1. `const root = new THREE.Group();`
+2. **Materials block** — one `MeshStandardMaterial` per distinct color
+   class. Define them once, reuse across meshes.
+3. **Dimensions block** — named constants for the body's length/width/
+   height/radius and any derived spacings. Naming math constants makes
+   placement obvious and prevents the "I forgot what 0.27 meant" bug.
+4. **Body** — pick the primitive that matches the silhouette. Add to root.
+5. **Features** — one mesh per feature, position via the dimension
+   constants you just defined. Use simple for-loops for repeated parts
+   (`for (let i = 0; i < N; i++) { const angle = i / N * Math.PI * 2; ... }`).
+6. `fitToUnitCube(THREE, root);`
+7. `return root;`
 
-Vehicle modeling playbook:
-- If the OSD or reference image describes a vehicle, establish dimensions
-  before creating meshes: `length`, `width`, `height`, `bodyBottom`,
-  `wheelR`, axle positions, cabin/cockpit height, and front/rear Z positions.
-- Coordinate convention is mandatory: Y is up, X is width, and the vehicle
-  faces +Z. Attach every wheel, rotor, wing, fork, handlebar, mirror, light,
-  and cargo piece to the main body/fuselage/frame; no major vehicle part
-  should float apart from the structure unless explicitly described.
-- Cars/trucks: use layered rounded boxes, capsules, spheres, extruded side
-  profiles, or shallow ellipsoids for the body and cabin. Avoid a single flat
-  black slab. Add separate glass, headlights, taillights, grille/intake,
-  bumpers, mirrors, door handles/seams, trim, and four grounded wheels.
-- Car wheels: for front +Z vehicles, side wheels face outward along the X
-  axis. Torus tires start in the XY plane, so rotate tires with
-  `tire.rotation.y = Math.PI / 2`; cylinder hubs/caps start on the Y axis,
-  so rotate hubs/caps with `hub.rotation.z = Math.PI / 2`.
-- Bicycles/scooters/motorcycles: build the frame with TubeGeometry or
-  cylinders between axle/crank/seat/head points, then attach torus wheels,
-  hubs/spokes, forks, handlebars, grips, seat, pedals/crank or footboard,
-  fenders, lights, mirrors, baskets, and cargo boxes if present.
-- Airplanes/jets: keep fuselage, cockpit/canopy, main wings, vertical
-  stabilizer, horizontal stabilizers, engines/propellers, and landing gear
-  connected and aligned along +Z. Wings attach near the fuselage midsection;
-  tail surfaces attach at the rear, not above or beside the aircraft.
-- Drones/quadcopters: make a central body, four arms, four motor pods, four
-  rotor hubs, visible propeller blades, landing legs/skids, camera/gimbal,
-  status lights, and top screen/panel when present. Rotors should sit at arm
-  ends in the horizontal XZ plane.
-- Vehicle details are secondary to structure. First get the object class,
-  silhouette, count, orientation, and attachment correct; then add trim,
-  colors, logos, spokes, tread, and small hardware.
+Builder/helper functions are OPTIONAL — only worth defining when a part
+recurs 4+ times with non-trivial geometry. For most stems, inline meshes
+in `generate()` is cleaner. (The winning miners on this benchmark all
+write inline.)
 
-Silhouette illustration (an application of checklist rule #2):
-- Sharp-pointed almond/vesica/canoe: 2D Shape with two bezierCurveTo
-  long sides, then `ExtrudeGeometry(shape, {depth, bevelEnabled:true})`.
-- Smooth ellipse/oval: LatheGeometry then `mesh.scale.set(sx, 1, sz)`
-  with `sx ≠ sz`.
-- Kidney/curved free-form: SplineCurve points along the outline, then
-  ExtrudeGeometry.
+# Primitive selection cheatsheet
 
-Proportion tuning shortcut:
-- The fastest fix for a `wrong_proportion` issue is usually
-  `mesh.scale.set(sx, sy, sz)` BEFORE adding to group, NOT rebuilding the
-  geometry with new params. Rebuilding is necessary only when the primitive
-  type itself must change (e.g. cylinder → cone, box → extrude).
+| Silhouette / part type                                | Primitive |
+| ----------------------------------------------------- | --------- |
+| Rotationally symmetric body (vase, bottle, goblet,    |           |
+| wheel hub, gear, candle)                              | LatheGeometry (Vector2 profile) |
+| Non-circular rim of an otherwise lathe-shape          | LatheGeometry then `scale.set(sx, 1, sz)` |
+| Almond/lens/canoe/leaf rim                            | ExtrudeGeometry with bezierCurveTo Shape |
+| Flat custom silhouette (boat hull, sword blade,       |           |
+| picture frame, key)                                   | ExtrudeGeometry with Shape, bevelEnabled |
+| Box-shaped slab WITH rounded edges (calculator,       |           |
+| phone, soap, console body, vehicle body)              | ExtrudeGeometry with rounded-rectangle Shape + bevel; OR custom helper |
+| Sharp box (industrial crate, brick, structural)       | BoxGeometry |
+| Curved pipe / handle / wire / frame                   | TubeGeometry on CatmullRomCurve3 |
+| Sphere / dot / berry                                  | SphereGeometry / IcosahedronGeometry |
+| Cone / spike / arrow                                  | ConeGeometry |
+| Ring / torus / bezel                                  | TorusGeometry |
+| Capsule body (rolled-arm sofa bolster, soap bar)      | CapsuleGeometry |
 
-Multi-subject illustration (an application of the INVENTORY checklist rule):
-- Cues you're looking at a multi-subject scene: "X on Y", "X and Y",
-  "X with Y", "X containing/filled with Y" (drink+fruit in glass,
-  flowers in vase, food in bowl, items in jar, two of the same class).
-- Pattern: one named THREE.Group per subject, all attached to `root`,
-  one fitToUnitCube call at the end on `root` (NEVER per subject —
-  smaller subjects blow up otherwise).
-- Transparent containers: MeshPhysicalMaterial (transmission 0.7-0.95)
-  shell + separate LIQUID mesh inset just inside + SOLID PIECES inside
-  the liquid volume (not as surface dots on the glass).
+# Materials quick-reference (don't improvise PBR values)
 
-Vehicle proportion cheat-sheet (use BEFORE you start meshing — wrong
-proportions are the most-common reason cars look bad):
-- Sedan / standard car: L:W:H ≈ 4.0 : 1.6 : 1.25. Wheelbase ≈ 0.6 × L.
-  Roof line ≈ 0.55 × H from ground. Greenhouse (window band) is ~30% of
-  total height, NOT half — most miners make windows too tall.
-- SUV / crossover: L:W:H ≈ 3.8 : 1.7 : 1.6. Higher roof, more vertical
-  glass, larger wheel-arch radius.
-- Sports car / coupe: L:W:H ≈ 4.2 : 1.7 : 1.0. Very low roof, raked
-  windshield (angle ≈ 30° from horizontal), shorter rear deck.
-- Pickup truck: cabin (~40% of length) + flat cargo bed (~50% of length).
-  Distinct step between cabin roof and bed.
-- Bus / van: roof is nearly flat across the full length, no separate
-  trunk volume.
-- Wheels: tire diameter ≈ 0.2 × car length; track width ≈ 0.85 × car width.
-  All four wheels touch the ground plane (y = -H/2 + wheelR).
-- Glass plane MUST be inset from the body (offset ~0.02-0.04 inward) and
-  follow the body curvature. Windshield rakes back from the hood; rear
-  window rakes forward from the trunk. A-pillar and C-pillar separate the
-  side glass into front and rear windows — do not draw side glass as one
-  rectangle.
-- Add: front grille / intake, headlights (pair, recessed), tail lights
-  (pair, recessed), bumpers (front + rear, slightly protruding), wing
-  mirrors (small attached pods near A-pillar), door seams (thin dark
-  vertical lines), wheel arches (concave cutout above each wheel).
+| Surface                | params |
+| ---------------------- | ------ |
+| polished metal / chrome| MeshStandardMaterial color #d4d4d4 metalness 0.6 roughness 0.2 |
+| silver / pewter        | MeshStandardMaterial color #c0c0c0 metalness 0.5 roughness 0.25 |
+| brass / gold           | MeshStandardMaterial color #d4af37 metalness 0.5 roughness 0.3 |
+| dark gunmetal          | MeshStandardMaterial color #3a3a3a metalness 0.5 roughness 0.4 |
+| brushed metal          | MeshStandardMaterial color #909090 metalness 0.5 roughness 0.5 |
+| glossy plastic         | MeshStandardMaterial metalness 0.0 roughness 0.3 |
+| matte plastic / rubber | MeshStandardMaterial metalness 0.0 roughness 0.8 |
+| wood polished/satin    | MeshStandardMaterial color #c4a574 metalness 0.0 roughness 0.6 |
+| wood raw               | MeshStandardMaterial color #8b6f47 metalness 0.0 roughness 0.9 |
+| ceramic / glaze        | MeshStandardMaterial metalness 0.0 roughness 0.4 |
+| fabric / velvet        | MeshStandardMaterial metalness 0.0 roughness 0.95 |
+| leather                | MeshStandardMaterial metalness 0.0 roughness 0.7 |
+| clear glass / water    | MeshPhysicalMaterial transmission 0.95 ior 1.5 roughness 0.05 transparent true |
+| frosted glass          | MeshPhysicalMaterial transmission 0.7 ior 1.5 roughness 0.4 transparent true |
+| LED / emissive         | MeshStandardMaterial emissive=color emissiveIntensity 1.0 |
+| generic / unsure       | MeshStandardMaterial metalness 0.0 roughness 0.7 |
 
-Dial-face illustration (an application of checklist rules #4 and #5
-for clocks, compasses, watches, gauges):
-- Build order from camera outward: bezel ring → flat dial face →
-  markings as flat decals on the face (tiny +Z offset) → hands/needle
-  pivoting at center → glass dome on top → attached hinge/ring/crown
-  (overlap bezel by ~30%, never float).
+# Common pitfalls (each one of these has lost stems on this benchmark)
+
+- **Sharp BoxGeometry for a rounded product.** Calculators, phones,
+  consumer electronics, vehicle bodies, soap, soft furniture all have
+  visibly rounded edges. Use ExtrudeGeometry with a rounded-rectangle
+  Shape + bevel.
+- **Defaulting to Cylinder/Sphere when the silhouette is asymmetric.**
+  Almond, oval, leaf, canoe, kidney, teardrop, banana-curve shapes
+  → ExtrudeGeometry with a Shape, OR non-uniformly scaled Lathe.
+- **Modeling X-containing-Y as just X.** A glass of orange juice with
+  strawberries is THREE parts: glass shell, liquid, strawberries.
+  Modeling only the glass loses the visually dominant features.
+- **Placing a child at `parent.y + parentH` instead of
+  `parent.y + parentH/2 + childH/2`** (BoxGeometry is CENTERED — half
+  the height is on each side of origin). This is the #1 cause of
+  "parts floating above the body" renders.
+- **Dropping visible details to keep code short.** A pocket media player
+  with screen, dpad, buttons, three ports — model each, even if the
+  geometry is just a small box. A featureless slab loses to a slab
+  with crude features.
+- **Mixing 2D-point APIs with plain arrays.** LatheGeometry /
+  ExtrudeGeometry / TubeGeometry need `new THREE.Vector2(x,y)` or
+  `new THREE.Vector3(x,y,z)`. Plain `[x,y]` produces NaN vertices
+  and an invisible mesh.
+- **One flat color for a multi-color reference.** A yellow fruit with a
+  red blush, a blue+yellow+blue striped boat hull, a Coca-Cola bottle
+  with red script — model each color region with its own material.
+
+Examples below demonstrate the style. Study them, then write your own.
 """
     + "\n\n---\n\n"
     + THREEJS_OUTPUT_SPEC_REFERENCE
@@ -618,53 +237,29 @@ for clocks, compasses, watches, gauges):
 )
 
 
+def build_system_prompt(categories=None) -> str:
+    """R10: prompt is small enough that category pruning is no longer
+    necessary. Always returns the full prompt. Argument retained for
+    backward compatibility with caller scripts."""
+    return CODER_SYSTEM_PROMPT
+
+
 CODER_USER_TEMPLATE_OSD = """Object Structural Description (OSD):
 {osd_json}
 
-Generate the full JavaScript module now.
-
-Reminders before you write:
-- For each entry in `parts[]`, create a `const <name> = new THREE.Mesh(...)`
-  whose variable matches `parts[i].name` (lowercase, underscores). The
-  visual critic will refer to parts by that name in later repair rounds.
-- Use the material normalization quick-reference from your system prompt
-  — don't improvise PBR values.
-- Use the INVENTORY → DECOMPOSE → COMPOSE structure: one tiny
-  `buildXxx(THREE)` function per inventoried subject, each returning a
-  finished THREE.Group; `generate(THREE)` only composes them with
-  `.position.set(...)`. Start `generate` with the mandatory
-  `// inventory:` and `// layout:` comments.
-- Apply the rest of the pre-modeling checklist: silhouette before
-  primitive, color zones as separate materials, orientation toward
-  +Z for faced objects, attachment / no float / no intersection,
-  proportions before details, no symmetric-primitive default fallback.
-- Match the material normalization quick-reference, not improvised PBR.
-- Call your `fitToUnitCube` helper with `0.95 / maxDim` so the object
-  fills ~95% of the frame (not lost in background).
-
-Return ONLY the JS module source.
+Generate the full JavaScript module now. Return ONLY the JS source.
 """
 
 
-CODER_USER_TEMPLATE_FRESH = """Reference image is attached above. Decompose it into part meshes and generate the full JavaScript module now.
+CODER_USER_TEMPLATE_FRESH = """Reference image is attached above. Generate
+the full JavaScript module now.
 
-Reminders before you write:
-- Pick a clear part hierarchy from the image. Name each `const` after its
-  part (lowercase, underscores) so the critic can target it later.
-- Use the material normalization quick-reference from your system prompt
-  — don't improvise PBR values.
-- Use the INVENTORY → DECOMPOSE → COMPOSE structure: one tiny
-  `buildXxx(THREE)` function per inventoried subject, each returning a
-  finished THREE.Group; `generate(THREE)` only composes them with
-  `.position.set(...)`. Start `generate` with the mandatory
-  `// inventory:` and `// layout:` comments.
-- Apply the rest of the pre-modeling checklist: silhouette before
-  primitive, color zones as separate materials, orientation toward
-  +Z for faced objects, attachment / no float / no intersection,
-  proportions before details, no symmetric-primitive default fallback.
-- Match the material normalization quick-reference, not improvised PBR.
-- Call your `fitToUnitCube` helper with `0.95 / maxDim` so the object
-  fills ~95% of the frame (not lost in background).
+Quick checklist:
+- Match the silhouette first, materials second, details third.
+- All visible features (screen, ports, buttons, contents, decorations)
+  get their own meshes — don't collapse them.
+- Centered primitives (BoxGeometry etc.) span ±half on each axis.
+- Call `fitToUnitCube(THREE, root)` before returning.
 
 Return ONLY the JS module source.
 """
@@ -708,203 +303,30 @@ Critic score (0..1, higher is better): {overall_score}
 
 Keep the code for these parts byte-identical when possible. If you must
 touch their surrounding context, do so minimally — the critic has already
-validated these and changing them will regress the score.
+verified these aspects match.
 
-## FIX (address each issue)
+## FIX (these mismatches lost points)
 
-Each issue has `kind`, `target_node_id` (a mesh/group variable name in
-your previous module, or null), `severity`, and `description` (often
-with concrete numbers like "~30% of height" or hex colors like "#8b6f47").
+{issues_block}
 
-Kinds: wrong_proportion, wrong_color, wrong_material, missing_part,
-extra_part, wrong_count, wrong_position, wrong_orientation.
-
-{issues_json}
-
-Per-kind playbook:
-
-- `wrong_proportion`   → adjust the mesh's size params (BoxGeometry dims,
-  cylinder height, lathe profile point Y values, scale vector). Use the
-  concrete ratio from the description.
-- `wrong_color`        → change material `color:` to the hex from the
-  description.
-- `wrong_material`     → swap material type (`MeshStandardMaterial` vs
-  `MeshPhysicalMaterial` for glass with `transmission` + `ior`) and PBR
-  params (metalness, roughness) per your system prompt's normalization.
-- `missing_part`       → add a new mesh for the part the critic names;
-  place it as described. Reuse existing materials where materials match.
-- `extra_part`         → delete the relevant group.add(...) line and the
-  mesh's geometry/material if no longer used.
-- `wrong_count`        → adjust instanced_group count or duplicate/remove
-  meshes to match.
-- `wrong_position`     → move the mesh (or its parent group) along the
-  axis the description names.
-- `wrong_orientation`  → add or adjust `mesh.rotation.<axis>`.
-
-Vehicle repair priority:
-- For cars, bikes, scooters, motorcycles, aircraft, and drones, fix object
-  class, silhouette, part count, attachment, and orientation before color or
-  material. Do not spend a repair round only changing paint if wheels,
-  rotors, wings, forks, or fuselage/body are missing or disconnected.
-- Treat floating vehicle parts as structural failures. Attach wings to the
-  fuselage, wheels to axles/forks/body, rotors to arm ends, handlebars to a
-  stem/frame, and cockpit/canopy to the fuselage/cabin.
-- For vehicle side wheels with front +Z, tires should face along X
-  (`TorusGeometry` tire `rotation.y = Math.PI / 2`) and hubs/caps should
-  face along X (`CylinderGeometry` hub `rotation.z = Math.PI / 2`).
-- When the issue says missing spokes, treads, mirrors, lights, baskets,
-  landing gear, propeller blades, or trim, add those parts without deleting
-  already-correct body/frame geometry.
-
-Surface decoration repair priority:
-- If painted or printed texture appears as detached blobs, floating flowers,
-  protruding balls, or rods hovering beside the object, treat it as a high
-  priority placement/material bug. Move the motifs onto the surface, flatten
-  them, and offset them only slightly along the surface normal.
-- Keep ceramic/vase/glass body geometry stable when it already matches.
-  Repair texture by editing decal positions, scale, orientation, color, and
-  thickness rather than rebuilding the whole vessel.
-- For curved vessels, convert decoration placement to angle/height/radius
-  coordinates and orient each motif to the radial normal. Stems/vines should
-  be thin curves following the same surface patch.
-
-Seating repair priority:
-- For sofas/chairs/loungers, fix object class and furniture structure before
-  color: seat count, cushion modules, back height, arm shape, leg/frame
-  placement, recline angle, and support rails/slats.
-- If padded furniture looks like sharp blocks, add rounded bolsters, edge
-  piping, cushion seams, and soft pillows rather than rebuilding as a flat
-  box assembly.
-- If a tufted sofa lacks buttons/depressions, add a regular button grid on
-  the back and arms with small inset discs and short radial crease marks.
-- If a chaise or bench lacks slats/gaps, split the deck into repeated planks
-  following the recline curve and add cross rails/angled legs under it.
-- Preserve correct color/material regions while repairing structure: do not
-  turn wood frames into upholstery, metal legs into fabric, or leather/fabric
-  cushions into bare boxes.
-
-## Rules
-
-- Target `target_node_id` when present — find `const <id> = ...` in your
-  previous module and edit that section.
-- Do NOT rewrite the entire module from scratch. Start from your previous
-  version (in the session history) and patch.
-- Do NOT touch PRESERVE items.
-- Remember the Critical API rules from your system prompt — especially:
-  · No randomness: `Math.random`, `Date`, `crypto`, `performance`,
-    `THREE.MathUtils.seededRandom` all raise `FORBIDDEN_IDENTIFIER` and
-    fail the module. Use index arithmetic for deterministic variation.
-  · Vector2 for LatheGeometry profiles (plain `[x, y]` arrays produce NaN
-    vertices and a blank render). Prefer SplineCurve / CubicBezierCurve for
-    smooth profiles; their getSpacedPoints() returns Vector2[] directly.
-- Return ONLY the full corrected JavaScript module source — no prose,
-  no markdown fences.
+Rewrite the FULL module so that the FIX list is addressed while the
+PRESERVE list stays intact. Return ONLY the corrected JavaScript module source.
 """
 
 
 CODER_USER_TEMPLATE_CRITIC_REPAIR = """Your previous JavaScript module rendered, but the visual critic found
-mismatches between the render and the reference image.
-
-OSD (for reference):
-{osd_json}
+mismatches between the render and the OSD.
 
 Critic score (0..1, higher is better): {overall_score}
 
-## PRESERVE (do NOT change these — they already match the reference)
+## PRESERVE (do NOT change these — they already match)
 
 {matching_block}
 
-Keep the code for these parts byte-identical when possible. If you must
-touch their surrounding context, do so minimally — the critic has already
-validated these and changing them will regress the score.
+## FIX (these mismatches lost points)
 
-## FIX (address each issue)
+{issues_block}
 
-Each issue has `kind`, `target_node_id` (a mesh/group variable name in
-your previous module, or null), `severity`, and `description` (often
-with concrete numbers like "~30% of height" or hex colors like "#8b6f47").
-
-Kinds: wrong_proportion, wrong_color, wrong_material, missing_part,
-extra_part, wrong_count, wrong_position, wrong_orientation.
-
-{issues_json}
-
-Per-kind playbook:
-
-- `wrong_proportion`   → adjust the mesh's size params (BoxGeometry dims,
-  cylinder height, lathe profile point Y values, scale vector). Use the
-  concrete ratio from the description.
-- `wrong_color`        → change material `color:` to the hex from the
-  description.
-- `wrong_material`     → swap material type (`MeshStandardMaterial` vs
-  `MeshPhysicalMaterial` for glass with `transmission` + `ior`) and PBR
-  params (metalness, roughness) per your system prompt's normalization.
-- `missing_part`       → add a new mesh for the part from the OSD; place
-  it as described. Reuse existing materials where materials match.
-- `extra_part`         → delete the relevant group.add(...) line and the
-  mesh's geometry/material if no longer used.
-- `wrong_count`        → adjust instanced_group count or duplicate/remove
-  meshes to match.
-- `wrong_position`     → move the mesh (or its parent group) along the
-  axis the description names.
-- `wrong_orientation`  → add or adjust `mesh.rotation.<axis>`.
-
-Vehicle repair priority:
-- For cars, bikes, scooters, motorcycles, aircraft, and drones, fix object
-  class, silhouette, part count, attachment, and orientation before color or
-  material. Do not spend a repair round only changing paint if wheels,
-  rotors, wings, forks, or fuselage/body are missing or disconnected.
-- Treat floating vehicle parts as structural failures. Attach wings to the
-  fuselage, wheels to axles/forks/body, rotors to arm ends, handlebars to a
-  stem/frame, and cockpit/canopy to the fuselage/cabin.
-- For vehicle side wheels with front +Z, tires should face along X
-  (`TorusGeometry` tire `rotation.y = Math.PI / 2`) and hubs/caps should
-  face along X (`CylinderGeometry` hub `rotation.z = Math.PI / 2`).
-- When the issue says missing spokes, treads, mirrors, lights, baskets,
-  landing gear, propeller blades, or trim, add those parts without deleting
-  already-correct body/frame geometry.
-
-Surface decoration repair priority:
-- If painted or printed texture appears as detached blobs, floating flowers,
-  protruding balls, or rods hovering beside the object, treat it as a high
-  priority placement/material bug. Move the motifs onto the surface, flatten
-  them, and offset them only slightly along the surface normal.
-- Keep ceramic/vase/glass body geometry stable when it already matches.
-  Repair texture by editing decal positions, scale, orientation, color, and
-  thickness rather than rebuilding the whole vessel.
-- For curved vessels, convert decoration placement to angle/height/radius
-  coordinates and orient each motif to the radial normal. Stems/vines should
-  be thin curves following the same surface patch.
-
-Seating repair priority:
-- For sofas/chairs/loungers, fix object class and furniture structure before
-  color: seat count, cushion modules, back height, arm shape, leg/frame
-  placement, recline angle, and support rails/slats.
-- If padded furniture looks like sharp blocks, add rounded bolsters, edge
-  piping, cushion seams, and soft pillows rather than rebuilding as a flat
-  box assembly.
-- If a tufted sofa lacks buttons/depressions, add a regular button grid on
-  the back and arms with small inset discs and short radial crease marks.
-- If a chaise or bench lacks slats/gaps, split the deck into repeated planks
-  following the recline curve and add cross rails/angled legs under it.
-- Preserve correct color/material regions while repairing structure: do not
-  turn wood frames into upholstery, metal legs into fabric, or leather/fabric
-  cushions into bare boxes.
-
-## Rules
-
-- Target `target_node_id` when present — find `const <id> = ...` in your
-  previous module and edit that section.
-- Do NOT rewrite the entire module from scratch. Start from your previous
-  version (in the session history) and patch.
-- Do NOT touch PRESERVE items.
-- Remember the Critical API rules from your system prompt — especially:
-  · No randomness: `Math.random`, `Date`, `crypto`, `performance`,
-    `THREE.MathUtils.seededRandom` all raise `FORBIDDEN_IDENTIFIER` and
-    fail the module. Use index arithmetic for deterministic variation.
-  · Vector2 for LatheGeometry profiles (plain `[x, y]` arrays produce NaN
-    vertices and a blank render). Prefer SplineCurve / CubicBezierCurve for
-    smooth profiles; their getSpacedPoints() returns Vector2[] directly.
-- Return ONLY the full corrected JavaScript module source — no prose,
-  no markdown fences.
+Rewrite the FULL module so that the FIX list is addressed while the
+PRESERVE list stays intact. Return ONLY the corrected JavaScript module source.
 """

@@ -518,7 +518,7 @@ async def main():
 
     # ─── STEP 2: generate leader + ours ──────────────────────────────
     log.info("STEP 2 · generate leader + ours in parallel (ensemble=6, max_iter=2)")
-    leader_wt = ensure_worktree(args.leader_ref)
+    leader_wt = None if args.leader_ref == "winner" else ensure_worktree(args.leader_ref)
     ours_wt = ensure_worktree(args.ours_ref)
     ref_path = Path("/tmp/r8_refs") / f"{stem}.png"
 
@@ -556,18 +556,27 @@ async def main():
     ctx["inventory"] = {k: v for k, v in inventory.items() if k != "raw"}
 
     t0 = time.time()
-    # Pass judge URL down: ours uses GLM bracket selection (matches the
-    # validator); leader baseline runner gracefully falls back to critic
-    # if its worktree predates the bracket helper.
-    (leader_js, leader_meta), (ours_js, ours_meta) = await asyncio.gather(
-        run_one_subprocess(leader_wt, stem, ref_path, categories=cats,
-                            judge_url=args.judge_url, judge_model=args.judge_model,
-                            judge_key=args.judge_key),
-        run_one_subprocess(ours_wt, stem, ref_path, categories=cats,
-                            judge_url=args.judge_url, judge_model=args.judge_model,
-                            judge_key=args.judge_key,
-                            inventory_json=inv_json),
-    )
+    if args.leader_ref == "winner":
+        # New mode: leader is the R8 winner candidate (5HgGDgMf...) pulled
+        # from the pre-downloaded pool. No subprocess for leader.
+        from compare_r8 import load_winner_js
+        leader_js, leader_meta = load_winner_js(stem)
+        log.info(f"  leader=winner_pool {'loaded' if leader_js else 'MISSING'}")
+        ours_js, ours_meta = await run_one_subprocess(
+            ours_wt, stem, ref_path, categories=cats,
+            judge_url=args.judge_url, judge_model=args.judge_model,
+            judge_key=args.judge_key, inventory_json=inv_json,
+        )
+    else:
+        (leader_js, leader_meta), (ours_js, ours_meta) = await asyncio.gather(
+            run_one_subprocess(leader_wt, stem, ref_path, categories=cats,
+                                judge_url=args.judge_url, judge_model=args.judge_model,
+                                judge_key=args.judge_key),
+            run_one_subprocess(ours_wt, stem, ref_path, categories=cats,
+                                judge_url=args.judge_url, judge_model=args.judge_model,
+                                judge_key=args.judge_key,
+                                inventory_json=inv_json),
+        )
     log.info(f"  generation took {time.time()-t0:.1f}s")
     log.info(f"  leader: status={leader_meta.get('status')} "
              f"best_score={leader_meta.get('best_score')} "

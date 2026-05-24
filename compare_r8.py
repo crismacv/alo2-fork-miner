@@ -436,6 +436,19 @@ def ensure_worktree(commit_ref: str) -> Path:
     return wt
 
 
+WINNER_POOL = Path("/tmp/winner_r8")  # pre-downloaded R8 winner submissions
+
+
+def load_winner_js(stem: str) -> tuple[str | None, dict]:
+    """Read a pre-downloaded winner submission as the 'leader' arm.
+    No subprocess, no generation cost — just a file read."""
+    p = WINNER_POOL / f"{stem}.js"
+    if not p.exists():
+        return None, {"status": "winner_missing", "dt": 0.0}
+    return p.read_text(), {"status": "winner_pool", "dt": 0.0, "best_score": None,
+                            "n_ensemble": 1, "n_survivors": 1}
+
+
 async def run_one_subprocess(work_dir: Path, stem: str, ref_path: Path,
                               categories: list[str] | None = None,
                               judge_url: str | None = None,
