@@ -388,6 +388,46 @@ Modeling strategy:
 - Keep material choices conservative and compatible with the fixed render setup.
 - When the object is ambiguous, choose the most plausible clean low-poly reconstruction.
 
+Rounded-edges rule (most real objects have soft edges, not sharp corners
+— sharp `BoxGeometry` reads as a cartoon block and loses to leader on
+almost every consumer-product reference):
+- For consumer electronics (calculator, phone, remote, monitor, laptop),
+  toys, soap, books, food packaging, soft furniture, vehicle bodies,
+  cushioned panels, kitchenware: DO NOT use plain `BoxGeometry` for the
+  main slab. Use ExtrudeGeometry with a 2D rounded-rectangle Shape and
+  a small bevel, OR build the body via a `roundedSlab` helper.
+- Recipe — rounded rectangle silhouette extruded (works for any
+  slab-shaped body):
+    function makeRoundedSlab(THREE, w, h, d, r) {
+      const x0 = -w/2, y0 = -h/2, rr = Math.min(r, w/2, h/2);
+      const s = new THREE.Shape();
+      s.moveTo(x0 + rr, y0);
+      s.lineTo(x0 + w - rr, y0);
+      s.quadraticCurveTo(x0 + w, y0, x0 + w, y0 + rr);
+      s.lineTo(x0 + w, y0 + h - rr);
+      s.quadraticCurveTo(x0 + w, y0 + h, x0 + w - rr, y0 + h);
+      s.lineTo(x0 + rr, y0 + h);
+      s.quadraticCurveTo(x0, y0 + h, x0, y0 + h - rr);
+      s.lineTo(x0, y0 + rr);
+      s.quadraticCurveTo(x0, y0, x0 + rr, y0);
+      const g = new THREE.ExtrudeGeometry(s, {
+        depth: d, bevelEnabled: true,
+        bevelSegments: 4, bevelSize: r * 0.6,
+        bevelThickness: r * 0.6, curveSegments: 12,
+      });
+      g.translate(0, 0, -d / 2);  // center along z (extrudes from z=0..d)
+      return g;
+    }
+  Typical corner radius `r`: 8-15 % of the smaller of w/h. For a
+  calculator body: r ≈ 0.04 when body is ~1.0 × 1.4.
+- This single recipe converts almost every "boxy product" generation
+  from cartoon-cube to plausible product silhouette. Apply it to the
+  main body and the button face plates. Buttons themselves can stay
+  CylinderGeometry (round) or use the same recipe with smaller r.
+- DO NOT use rounded edges where the reference clearly shows sharp
+  corners (industrial crates, brick, cube ice, structural metal
+  brackets, military gear).
+
 Seating furniture / upholstery handbook:
 - For chairs, sofas, couches, loveseats, armchairs, benches, and chaise
   lounges, establish furniture dimensions before meshes: `seatW`, `seatD`,
