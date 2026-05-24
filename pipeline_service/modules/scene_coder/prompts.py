@@ -264,10 +264,16 @@ Pre-modeling checklist (run through this BEFORE writing any geometry —
 this is the single biggest predictor of a correct render):
 1. INVENTORY → DECOMPOSE → COMPOSE · this is the structural backbone
    that prevents dropped subjects and unclear scenes.
-   (a) Inventory · list EVERY visually distinct subject in the reference,
-       including contents inside transparent or open containers (liquid,
-       floating pieces, food in bowl, items in jar). Typical count is
-       1-5 subjects.
+   (a) Inventory · list EVERY visually distinct ELEMENT in the reference.
+       An element is a separate subject (cup, car) OR a distinct visible
+       FEATURE on a single device (screen, dpad, port, lens, vent, light,
+       badge, dial, hinge, ring). For a complex consumer device
+       (calculator, phone, console, camera, instrument, vehicle), the
+       inventory MUST name at least 3-5 features even though they're parts
+       of one object — otherwise the body comes out as a featureless block.
+       Also include contents inside containers (liquid, floating fruit,
+       food). Typical count: 1-3 for simple objects, 3-8 for complex
+       devices / multi-subject scenes.
        PATTERN vs SUBJECT — most miners over-decompose surface patterns
        into many subjects, wasting structure and rendering them as a
        stack of misaligned shapes. Apply this distinction strictly:

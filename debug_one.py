@@ -112,7 +112,13 @@ Critical rules:
   "distributed_throughout_<container>", NOT "clustered_on_top_of_<container>".
 - For decorated cakes, do not collapse all toppings into one subject — count
   groups separately if the colors / shapes differ.
-- For vehicles, include wheels (count=4), headlights (count=2), etc.
+- For complex CONSUMER DEVICES (calculator, phone, camera, console, monitor,
+  remote, gauge, instrument): list each visible FEATURE as its own subject:
+  screen, button_group, dpad, individual_ports, lens, speaker_grille, lights,
+  badge, vent. Do NOT collapse the entire device into a single "console" or
+  "camera" subject — the body will come out as a featureless block. Aim for
+  3-5 features for any device showing keypad / screen / ports.
+- For vehicles, include wheels (count=4), headlights (count=2), grille, etc.
 - Include the container as its own subject.
 - PATTERN vs SUBJECT — surface patterns (rainbow stripes on a blanket,
   polka dots on fabric, logo painted on a bottle, plaid, gradient) are

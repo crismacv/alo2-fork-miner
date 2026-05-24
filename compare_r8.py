@@ -630,7 +630,14 @@ main { padding:14px 18px; display:flex; flex-direction:column; gap:14px;
 .summary-tile { background:var(--panel2); padding:10px 12px;
                 display:flex; flex-direction:column; gap:8px; }
 .summary-tile .stem { color:var(--muted); font-size:9px; font-family:monospace;
-                      word-break:break-all; line-height:1.3; margin-top:auto; }
+                      word-break:break-all; line-height:1.3; }
+.summary-tile .btn-del { margin-top:auto; align-self:flex-end;
+                         background:transparent; color:var(--muted);
+                         border:1px solid var(--border); padding:3px 8px;
+                         font-size:10px; border-radius:4px; cursor:pointer;
+                         letter-spacing:.04em; text-transform:uppercase; }
+.summary-tile .btn-del:hover { background:var(--danger); color:#000;
+                                border-color:var(--danger); }
 .summary-tile .verdict { font-size:12px; font-weight:600; padding:4px 10px;
                          border-radius:4px; display:inline-block; align-self:flex-start;
                          text-transform:uppercase; letter-spacing:.04em; }
@@ -709,6 +716,17 @@ function closeModal() {
 }
 function toggleStrips(id) {
   document.getElementById(id).classList.toggle('open');
+}
+async function deleteRow(runId, label) {
+  if (!confirm(`delete this row (${label})?`)) return;
+  const resp = await fetch('/delete/' + encodeURIComponent(runId), { method: 'POST' });
+  if (resp.ok) {
+    // soft-remove from DOM right away (snappier than full reload)
+    const el = document.querySelector('[data-run-id="' + runId + '"]');
+    if (el) el.remove();
+  } else {
+    alert('delete failed: ' + (await resp.text()));
+  }
 }
 window.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 """
@@ -854,8 +872,12 @@ def write_dashboard():
         leader_img_onclick = f"onclick=\"openImg('{leader_main}','leader render · {stem_short}')\"" if leader_main else ""
         ours_img_onclick = f"onclick=\"openImg('{ours_main}','ours render · {stem_short}')\"" if ours_main else ""
 
+        run_id = r.get("run_id", "")
+        del_btn = (f'<button class=btn-del onclick="deleteRow(&quot;{run_id}&quot;,'
+                   f'&quot;{stem_short}&quot;)" title="delete this row">delete</button>')
+
         parts.append(f"""
-<div class=duel>
+<div class=duel data-run-id="{run_id}">
   <div class=duel-top>
     <div class=tile>
       <div class=tile-head>
@@ -886,6 +908,7 @@ def write_dashboard():
       <div class=config>{label or 'unlabeled'} · {lref_short} → {oref_short}</div>
       <div class=row2>{votes_html}</div>
       <div class=stem>{r['stem']}</div>
+      {del_btn}
     </div>
   </div>
   <button class=toggle-strips onclick="toggleStrips('{strips_id}')">8-view sweep ▾</button>
