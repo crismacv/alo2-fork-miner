@@ -167,6 +167,23 @@ Seating furniture / upholstery handbook:
   materials from upholstery.
 - Small pillows should be separate soft rounded cuboids or flattened spheres
   leaning on the back/arms, not hard cubes floating above the seat.
+- Seat-to-leg attachment (CRITICAL — most miners leave a visible gap):
+  the seat slab's BOTTOM face must sit AT the top of the legs, no air
+  gap. Concretely: if seat is BoxGeometry(seatW, seatT, seatD) centered
+  at `seat.position.y = legH + seatT/2`, then each leg's TOP must reach
+  exactly `y = legH` (with leg center at `y = legH/2` for vertical
+  cylinders). Verify mentally before writing.
+- Cabriole / curved legs (small stools, end tables, antique pieces):
+  the top of each leg attaches at a SEAT CORNER (or near it). The leg
+  then curves OUTWARD slightly at the knee (`y ≈ legH * 0.7`), then
+  curves back INWARD toward a small spherical foot at the bottom. Use
+  a TubeGeometry along a CatmullRomCurve3 with 3-4 control points to
+  trace the S-shape, OR stack a sphere+truncated-cone+thinner-cone.
+- Do not let leg cylinders intersect each other or the seat slab.
+  Intersecting cylinders create visible holes / wedge cuts at the
+  intersection. Each leg gets its own non-overlapping geometry; if
+  they need to converge (e.g. cross-stretcher), use small connector
+  meshes at the meeting point.
 
 Surface decoration / decal handbook:
 - For painted, printed, glazed, engraved, or floral ornament on a ceramic,
@@ -253,6 +270,25 @@ Multi-subject scene handbook (CRITICAL — most miners get this wrong):
   · "X with Y" where Y is detachable (mug with spoon, phone with case-off)
   · Two of the same class at different sizes/orientations
   · A figure interacting with a tool / instrument / vehicle
+- CONTAINED relationships (also multi-subject — most miners miss this):
+  · "X containing Y" / "filled X" / "X of Y": glass of orange juice with
+    floating fruit pieces, mug of coffee with foam on top, vase with
+    flowers, jar of marbles, bowl of food, lamp with bulb, terrarium
+    with plants, transparent box showing items inside, kettle with
+    visible water level.
+  · For transparent / translucent containers (glass, jar, beaker): use
+    MeshPhysicalMaterial transmission≈0.7-0.95 for the shell, then
+    model the LIQUID as a separate filled solid (CylinderGeometry
+    inset slightly inside the container, colored MeshStandardMaterial
+    with low roughness if it's juice/wine/oil). Place SOLID FLOATING
+    PIECES (fruit slices, ice cubes, garnish) as small Sphere/Box/
+    irregular meshes positioned inside the liquid volume — NOT as
+    decoration spots on the glass surface.
+  · For opaque containers with visible contents (bowl, plate): the
+    contents (food, flowers, objects) are independent subjects placed
+    inside/on top of the container body.
+  · Never reduce "X containing Y" to "just X" — the contents are
+    usually the visually dominant part of the reference image.
 
 Vehicle proportion cheat-sheet (use BEFORE you start meshing — wrong
 proportions are the most-common reason cars look bad):
@@ -278,6 +314,35 @@ proportions are the most-common reason cars look bad):
   (pair, recessed), bumpers (front + rear, slightly protruding), wing
   mirrors (small attached pods near A-pillar), door seams (thin dark
   vertical lines), wheel arches (concave cutout above each wheel).
+
+Instrument / dial-face handbook (clocks, compasses, watches, gauges,
+meters, dials, speedometers, barometers, stopwatches, pocket watches):
+- The DIAL FACE is the defining feature — it MUST face +Z (toward the
+  camera). Do not lay the instrument flat with its face hidden. If
+  unsure of orientation, default to: face plane perpendicular to +Z,
+  bezel/case extruded back along -Z.
+- Build order: (1) circular case/bezel ring (TorusGeometry or thin
+  CylinderGeometry shell), (2) flat dial face (thin CircleGeometry
+  with `dialMat`), (3) markings on the face, (4) hands/needle, (5)
+  crystal/glass dome ON TOP (slight z-offset), (6) attached hinge/
+  ring/loop/crown.
+- Markings (numbers, hour ticks, N/S/E/W letters): use ShapeGeometry,
+  flat ExtrudeGeometry (thin), or small CircleGeometry dots placed
+  AT THE FACE PLANE with tiny +Z offset (~0.002). Numbers should sit
+  on a circle of radius ~0.8 × dial radius. Do not float markings
+  away from the face.
+- Hands / needles: thin elongated boxes or thin extrusions, pivoting
+  at the dial center, rotated about the +Z axis. Hour/minute hand
+  pair on clocks; single magnetic needle (often N-pointer red, S-
+  pointer white) on compass.
+- Hinge / ring / loop / crown / chain ring: MUST be physically
+  attached to the case body. Place at the top (12 o'clock direction)
+  and overlap the bezel by ~30% so it reads as connected. Never let
+  the loop float in empty space.
+- Cover glass / crystal: thin CylinderGeometry (very low height) or
+  ShapeGeometry with MeshPhysicalMaterial transmission≈0.9, mounted
+  flush with the bezel. Do not omit it for pocket watches /
+  compasses — the dome over the face is iconic.
 """
     + "\n\n---\n\n"
     + THREEJS_OUTPUT_SPEC_REFERENCE
@@ -312,11 +377,25 @@ Reminders before you write:
   grille + lights + bumpers + mirrors + door seams + wheel arches.
   Wrong proportions are the #1 reason cars look like generic boxes.
 - If the reference shows TWO OR MORE distinct subjects (object on a
-  plate, mug with a spoon, figure with a tool, two cars, etc.), follow
-  the multi-subject scene handbook: model EVERY subject as its own
-  named THREE.Group, position them to match the reference's spatial
-  layout, and call fitToUnitCube once on `root` after attaching all
-  of them. Do not drop the smaller / partially occluded subject.
+  plate, mug with a spoon, figure with a tool, two cars, etc.) OR a
+  CONTAINER with visible CONTENTS (glass of juice with fruit, vase
+  with flowers, jar of items, bowl of food), follow the multi-subject
+  scene handbook: model EVERY subject (container AND its contents) as
+  its own named THREE.Group, position them to match the reference's
+  spatial layout, and call fitToUnitCube once on `root` after
+  attaching all of them. Do not drop the contents / smaller / partially
+  occluded subject — the contents are often the visually dominant part.
+- If this is an INSTRUMENT WITH A DIAL FACE (clock, compass, watch,
+  gauge, meter, stopwatch), use the instrument/dial-face handbook:
+  the face MUST face +Z (toward the camera). Build bezel → flat dial
+  face → markings as flat decals on the face → hands/needle pivoting
+  at center → glass dome on top → hinge/ring/crown ATTACHED to the
+  case (no float).
+- For stools, benches, chairs, tables, the seat/top slab's bottom
+  must touch the top of every leg with no air gap. Cabriole legs
+  attach at the SEAT CORNERS and S-curve outward then inward. Do not
+  let leg cylinders intersect each other or the seat slab — gives
+  visible geometry holes.
 - Call your `fitToUnitCube` helper with `0.95 / maxDim` so the object
   fills ~95% of the frame (not lost in background).
 
@@ -344,11 +423,25 @@ Reminders before you write:
   grille + lights + bumpers + mirrors + door seams + wheel arches.
   Wrong proportions are the #1 reason cars look like generic boxes.
 - If the reference shows TWO OR MORE distinct subjects (object on a
-  plate, mug with a spoon, figure with a tool, two cars, etc.), follow
-  the multi-subject scene handbook: model EVERY subject as its own
-  named THREE.Group, position them to match the reference's spatial
-  layout, and call fitToUnitCube once on `root` after attaching all
-  of them. Do not drop the smaller / partially occluded subject.
+  plate, mug with a spoon, figure with a tool, two cars, etc.) OR a
+  CONTAINER with visible CONTENTS (glass of juice with fruit, vase
+  with flowers, jar of items, bowl of food), follow the multi-subject
+  scene handbook: model EVERY subject (container AND its contents) as
+  its own named THREE.Group, position them to match the reference's
+  spatial layout, and call fitToUnitCube once on `root` after
+  attaching all of them. Do not drop the contents / smaller / partially
+  occluded subject — the contents are often the visually dominant part.
+- If this is an INSTRUMENT WITH A DIAL FACE (clock, compass, watch,
+  gauge, meter, stopwatch), use the instrument/dial-face handbook:
+  the face MUST face +Z (toward the camera). Build bezel → flat dial
+  face → markings as flat decals on the face → hands/needle pivoting
+  at center → glass dome on top → hinge/ring/crown ATTACHED to the
+  case (no float).
+- For stools, benches, chairs, tables, the seat/top slab's bottom
+  must touch the top of every leg with no air gap. Cabriole legs
+  attach at the SEAT CORNERS and S-curve outward then inward. Do not
+  let leg cylinders intersect each other or the seat slab — gives
+  visible geometry holes.
 - Call your `fitToUnitCube` helper with `0.95 / maxDim` so the object
   fills ~95% of the frame (not lost in background).
 
