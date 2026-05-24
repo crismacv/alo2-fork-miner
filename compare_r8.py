@@ -436,16 +436,30 @@ def ensure_worktree(commit_ref: str) -> Path:
     return wt
 
 
-WINNER_POOL = Path("/tmp/winner_r8")  # pre-downloaded R8 winner submissions
+# R8 audit candidates ordered by direct H2H strength (winner_c is strongest).
+WINNER_POOLS = {
+    "winner_a": Path("/tmp/winner_a_r8"),  # 5HgGDgMf — first audit candidate (vs leader +0.12)
+    "winner_b": Path("/tmp/winner_b_r8"),  # 5G4Z9uJLPN — beat winner_a by 0.03
+    "winner_c": Path("/tmp/winner_c_r8"),  # 5GZSyVqH  — beat winner_b by 0.09 (strongest H2H)
+    "winner":   Path("/tmp/winner_r8"),    # legacy alias → winner_a
+}
 
 
-def load_winner_js(stem: str) -> tuple[str | None, dict]:
+def load_winner_js(stem: str, which: str = "winner_c") -> tuple[str | None, dict]:
     """Read a pre-downloaded winner submission as the 'leader' arm.
-    No subprocess, no generation cost — just a file read."""
-    p = WINNER_POOL / f"{stem}.js"
+    No subprocess, no generation cost — just a file read.
+
+    `which` selects which audit-candidate's submission to use:
+      - 'winner_a' (5HgGDgMf...) : first audit, vs-leader margin 0.12
+      - 'winner_b' (5G4Z9uJLPN...): second audit
+      - 'winner_c' (5GZSyVqH...) : strongest by H2H — default for R10 onwards
+      - 'winner'                  : alias for winner_a (legacy)
+    """
+    pool = WINNER_POOLS.get(which, WINNER_POOLS["winner_c"])
+    p = pool / f"{stem}.js"
     if not p.exists():
         return None, {"status": "winner_missing", "dt": 0.0}
-    return p.read_text(), {"status": "winner_pool", "dt": 0.0, "best_score": None,
+    return p.read_text(), {"status": which, "dt": 0.0, "best_score": None,
                             "n_ensemble": 1, "n_survivors": 1}
 
 

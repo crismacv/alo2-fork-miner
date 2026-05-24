@@ -518,7 +518,7 @@ async def main():
 
     # ─── STEP 2: generate leader + ours ──────────────────────────────
     log.info("STEP 2 · generate leader + ours in parallel (ensemble=6, max_iter=2)")
-    leader_wt = None if args.leader_ref == "winner" else ensure_worktree(args.leader_ref)
+    leader_wt = None if args.leader_ref.startswith("winner") else ensure_worktree(args.leader_ref)
     ours_wt = ensure_worktree(args.ours_ref)
     ref_path = Path("/tmp/r8_refs") / f"{stem}.png"
 
@@ -556,11 +556,12 @@ async def main():
     ctx["inventory"] = {k: v for k, v in inventory.items() if k != "raw"}
 
     t0 = time.time()
-    if args.leader_ref == "winner":
-        # New mode: leader is the R8 winner candidate (5HgGDgMf...) pulled
-        # from the pre-downloaded pool. No subprocess for leader.
+    if args.leader_ref.startswith("winner"):
+        # New mode: leader is one of the R8 audit candidates from the
+        # pre-downloaded pool. `--leader-ref winner_c` = strongest H2H.
         from compare_r8 import load_winner_js
-        leader_js, leader_meta = load_winner_js(stem)
+        which = args.leader_ref if args.leader_ref != "winner" else "winner_a"
+        leader_js, leader_meta = load_winner_js(stem, which=which)
         log.info(f"  leader=winner_pool {'loaded' if leader_js else 'MISSING'}")
         ours_js, ours_meta = await run_one_subprocess(
             ours_wt, stem, ref_path, categories=cats,
