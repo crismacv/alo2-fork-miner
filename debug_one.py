@@ -475,6 +475,11 @@ async def main():
                    help="generate 3 rotated views of the reference via Chutes "
                    "Qwen-Image-Edit-2511, lay out as a 2x2 grid, and pass that "
                    "to OURS coder so it sees the object from 4 angles.")
+    p.add_argument("--pattern-extract", action="store_true",
+                   help="if GLM gate says the object has a surface pattern, "
+                   "extract a clean pattern crop (via Chutes Qwen-Image-Edit, "
+                   "falling back to PIL center crop) and compose a 2-panel "
+                   "ref (top=shape, bottom=pattern+colors) for OURS coder.")
     args = p.parse_args()
 
     DEBUG_DIR.mkdir(parents=True, exist_ok=True)
@@ -559,11 +564,42 @@ async def main():
         inv_json = json.dumps(inv_clean, indent=2, ensure_ascii=False)
     ctx["inventory"] = {k: v for k, v in inventory.items() if k != "raw"}
 
+    # OPTIONAL: pattern extraction (gated by GLM). When the object has a
+    # visible surface pattern that geometry-only modeling would miss, we
+    # produce a 2-panel ref (top=shape, bottom=pattern crop with color
+    # swatches) so the coder can see the pattern clearly and reproduce
+    # the colors via sub-meshes / color zones.
+    pattern_path = None
+    if args.pattern_extract:
+        try:
+            sys.path.insert(0, str(ROOT))
+            from pattern_extract import extract_if_patterned
+            log.info("  pattern-extract: gating via GLM...")
+            t_pe = time.time()
+            pe = await extract_if_patterned(client_judge, args.judge_model, ref_bytes)
+            log.info(f"  pattern-extract: {time.time()-t_pe:.1f}s · result={'patterned' if pe else 'none'}")
+            if pe is not None:
+                pp = Path(f"/tmp/r8_refs/{stem}_pattern.png")
+                pp.write_bytes(pe["grid_bytes"])
+                pattern_path = pp
+                (stem_dir / "ref_pattern.png").write_bytes(pe["grid_bytes"])
+                (stem_dir / "pattern_only.png").write_bytes(pe["pattern_bytes"])
+                ctx["pattern"] = {k: v for k, v in pe.items()
+                                   if k not in ("grid_bytes", "pattern_bytes")}
+                log.info(f"  pattern: kind={pe['pattern_kind']} colors="
+                         f"{[c['hex'] for c in pe['colors'][:3]]} src={pe['source']}")
+        except Exception as e:
+            log.warning(f"  pattern-extract failed: {type(e).__name__}: {e}")
+    ctx["pattern_used"] = bool(pattern_path)
+
     # OPTIONAL: multi-view reference augmentation via Chutes Qwen-Image-Edit.
     # Produces a 2x2 grid (original + 3 rotations) and substitutes it for
     # the ref passed to OURS subprocess. Leader is unchanged. Falls back to
     # the original ref on any failure so we never block on the edit API.
     ours_ref_path = ref_path
+    # If pattern-extract produced a 2-panel grid, prefer it over the raw ref.
+    if pattern_path is not None:
+        ours_ref_path = pattern_path
     multi_view_path = None
     if args.multi_view:
         try:
