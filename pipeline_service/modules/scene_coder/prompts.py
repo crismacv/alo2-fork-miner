@@ -305,6 +305,20 @@ this is the single biggest predictor of a correct render):
    distinct color bands or two-tone (red blush on yellow fruit, dark
    purple bottom layer of dessert, painted logo on bottle), model
    each zone with its own material/sub-mesh, not one flat color.
+   SPATIAL DISTRIBUTION of repeated subjects (berries, leaves, spokes,
+   gems, dots) must match the reference, NOT default to "clustered on
+   top". Classify each repeated set as one of:
+     · `clustered_on_top` (cherry on cake, garnish on plate)
+     · `embedded_in_volume` (fruit inside drink, raisins in pudding,
+       blueberries IN a yogurt layer)
+     · `distributed_on_surface` (polka dots on a cup, gems around a
+       ring, spokes on a wheel)
+     · `surrounding_base` (petals around a stem, balls around a center)
+     · `lined_up` (books on shelf, beads on string)
+   The wrong distribution is the most common cause of "looks right
+   but loses to leader" verdicts even when individual subjects are
+   modeled correctly. Pick the distribution from the reference, not
+   from convenience.
 4. ORIENTATION · objects with a clear FRONT FACE (clocks, compasses,
    watches, phones, monitors, gauges, instruments, picture frames)
    must have that face pointing toward the camera (+Z), not flipped

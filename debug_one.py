@@ -85,6 +85,74 @@ Output JSON:
 """
 
 
+INVENTORY_USER = """Produce a STRUCTURED inventory of this reference image
+for procedural 3D modeling. Be exhaustive — include every visually distinct
+element, including contents inside transparent or open containers (liquid,
+floating pieces, food, items).
+
+Return JSON only:
+{
+  "subjects": [
+    {
+      "name": "<short lowercase noun, underscores ok>",
+      "count": <int — 1 if single, ~N if many of the same>,
+      "color": "<dominant color>",
+      "approx_shape": "<one word: cylinder, sphere, cube, cone, vase, leaf, almond, ring, irregular, ...>",
+      "size_relative": "<small | medium | large | dominant>",
+      "placement": "<one of: standalone | sits_on_base | held_by_X | inside_X | embedded_in_volume_of_X | clustered_on_top_of_X | distributed_throughout_X | distributed_on_surface_of_X | surrounding_X | lined_up_in_X>"
+    },
+    ...
+  ],
+  "scene_layout": "<one sentence describing overall spatial relationship>"
+}
+
+Critical rules:
+- For drinks/yogurt/soup with floating berries or chunks: those berries are
+  separate subjects with placement = "embedded_in_volume_of_<container>" or
+  "distributed_throughout_<container>", NOT "clustered_on_top_of_<container>".
+- For decorated cakes, do not collapse all toppings into one subject — count
+  groups separately if the colors / shapes differ.
+- For vehicles, include wheels (count=4), headlights (count=2), etc.
+- Include the container as its own subject.
+"""
+
+
+async def inventory_glm(client: AsyncOpenAI, model: str, ref: bytes) -> dict:
+    """Structured inventory pass. Returns dict with subjects list and layout
+    string. Returns {} on parse error so downstream falls back gracefully."""
+    try:
+        resp = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You produce structured JSON only — no prose."},
+                {"role": "user", "content": [
+                    {"type": "image_url", "image_url": {"url": _b64url(ref)}},
+                    {"type": "text", "text": INVENTORY_USER},
+                ]},
+            ],
+            max_tokens=4096, temperature=0.0, seed=42,
+        )
+        text = resp.choices[0].message.content or ""
+        raw = text
+        text = re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL).strip()
+        # Greedy JSON match — pick the outermost {} block
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        if not m:
+            return {"raw": raw, "parse_error": "no_json"}
+        try:
+            data = json.loads(m.group(0))
+        except json.JSONDecodeError:
+            txt = m.group(0).replace("'", '"')
+            try:
+                data = json.loads(txt)
+            except Exception as e:
+                return {"raw": raw, "parse_error": str(e)}
+        data["raw"] = raw
+        return data
+    except Exception as e:
+        return {"raw": "", "parse_error": f"{type(e).__name__}: {e}"}
+
+
 async def classify(client: AsyncOpenAI, model: str, ref: bytes) -> dict:
     """Returns dict with category/subject/n_distinct/complexity/challenge + raw."""
     try:
@@ -455,6 +523,25 @@ async def main():
     except Exception:
         pass
 
+    # Structured GLM inventory pass — extracts subjects + spatial placement.
+    # Passed to ours subprocess (NOT leader) so the leader baseline runs
+    # unchanged and the win comes from real lift, not from inventory help.
+    log.info("  GLM inventory pass...")
+    inventory = await inventory_glm(client_judge, args.judge_model, ref_bytes)
+    if inventory and "subjects" in inventory:
+        log.info(f"  inventory: {len(inventory['subjects'])} subjects · "
+                 f"layout='{(inventory.get('scene_layout') or '')[:80]}'")
+        for s in inventory["subjects"][:6]:
+            log.info(f"    · {s.get('name')} × {s.get('count')} "
+                     f"({s.get('placement')})")
+    else:
+        log.warning(f"  inventory parse failed: {inventory.get('parse_error')}")
+    inv_json = None
+    if inventory and "subjects" in inventory:
+        inv_clean = {k: v for k, v in inventory.items() if k != "raw"}
+        inv_json = json.dumps(inv_clean, indent=2, ensure_ascii=False)
+    ctx["inventory"] = {k: v for k, v in inventory.items() if k != "raw"}
+
     t0 = time.time()
     # Pass judge URL down: ours uses GLM bracket selection (matches the
     # validator); leader baseline runner gracefully falls back to critic
@@ -465,7 +552,8 @@ async def main():
                             judge_key=args.judge_key),
         run_one_subprocess(ours_wt, stem, ref_path, categories=cats,
                             judge_url=args.judge_url, judge_model=args.judge_model,
-                            judge_key=args.judge_key),
+                            judge_key=args.judge_key,
+                            inventory_json=inv_json),
     )
     log.info(f"  generation took {time.time()-t0:.1f}s")
     log.info(f"  leader: status={leader_meta.get('status')} "
@@ -561,6 +649,12 @@ async def main():
         p = asset_dir / name
         p.write_bytes(b)
         return str(p.relative_to(DASH_DIR))
+
+    # Also save the .js sources so the dashboard 3D viewer can import them.
+    if leader_js:
+        (asset_dir / "leader.js").write_text(leader_js)
+    if ours_js:
+        (asset_dir / "ours.js").write_text(ours_js)
 
     row = {
         "run_id": run_id, "ts": ctx["ts"], "stem": stem,

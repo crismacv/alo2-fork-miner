@@ -242,6 +242,10 @@ async def main():
                    "Qwen critic scores (matches the validator's selection method).")
     p.add_argument("--judge-model", default="zai-org/GLM-4.6V-Flash")
     p.add_argument("--judge-key", default="local")
+    p.add_argument("--inventory-file", default="",
+                   help="path to JSON file produced by GLM pre-inventory; if set, "
+                   "is prepended to the coder user message so the model starts "
+                   "from a structured subject list with spatial distribution hints.")
     args = p.parse_args()
 
     img = Path(args.ref).read_bytes()
@@ -262,6 +266,26 @@ async def main():
             log.info(f"  prompt pruned for categories {cats}: {len(pruned)} chars")
         else:
             log.info(f"  worktree lacks build_system_prompt; using full prompt")
+
+    # Prepend GLM-derived structured inventory to the user message templates
+    # so the model starts from accurate spatial distribution hints.
+    if args.inventory_file and Path(args.inventory_file).exists():
+        inv_raw = Path(args.inventory_file).read_text()
+        inventory_block = (
+            "Pre-computed inventory (from a vision pass on the same reference, "
+            "use this as the authoritative subject list and placement plan — do "
+            "NOT silently drop any subject or change `placement` unless the "
+            "reference clearly contradicts):\\n"
+            "```json\\n" + inv_raw + "\\n```\\n\\n"
+        )
+        from modules.scene_coder import agent as _agent_mod
+        for attr in ("CODER_USER_TEMPLATE_FRESH", "CODER_USER_TEMPLATE_OSD"):
+            old = getattr(_prompts, attr, None)
+            if old:
+                new = inventory_block + old
+                setattr(_prompts, attr, new)
+                setattr(_agent_mod, attr, new)
+        log.info(f"  inventory prepended ({len(inv_raw)} chars)")
     coder = SceneCoderAgent(client=client, model=MODEL, session_store=store,
                             temperature=0.0, seed=42, max_tokens=8192,
                             backend="vllm", total_stages=6)
@@ -416,7 +440,8 @@ async def run_one_subprocess(work_dir: Path, stem: str, ref_path: Path,
                               categories: list[str] | None = None,
                               judge_url: str | None = None,
                               judge_model: str = "zai-org/GLM-4.6V-Flash",
-                              judge_key: str = "local") -> tuple[str | None, dict]:
+                              judge_key: str = "local",
+                              inventory_json: str | None = None) -> tuple[str | None, dict]:
     out_js = Path(f"/tmp/gen_{work_dir.name}_{stem}.js")
     out_meta = Path(f"/tmp/gen_{work_dir.name}_{stem}.json")
     cmd = [
@@ -430,6 +455,12 @@ async def run_one_subprocess(work_dir: Path, stem: str, ref_path: Path,
         cmd += ["--judge-url", judge_url,
                 "--judge-model", judge_model,
                 "--judge-key", judge_key]
+    if inventory_json:
+        # Write to a temp file (CLI arg length and shell-escaping risk for big
+        # JSON); subprocess reads from disk.
+        inv_path = Path(f"/tmp/inv_{work_dir.name}_{stem}.json")
+        inv_path.write_text(inventory_json)
+        cmd += ["--inventory-file", str(inv_path)]
     proc = await asyncio.create_subprocess_exec(
         *cmd,
         cwd=str(work_dir),
@@ -769,11 +800,20 @@ def write_dashboard():
         label = r.get('label', '')
 
         # 3D-viewer src paths: assets/<stem>__<run>/leader.js etc.
-        # Derive from leader_main path: assets/X/leader_main.png → assets/X/leader.js
+        # Only show 3D button when the .js file actually exists on disk
+        # (recovered rows sometimes lacked the source).
         leader_main = r.get('leader_main') or ''
         ours_main = r.get('ours_main') or ''
-        leader_js_src = leader_main.rsplit('/', 1)[0] + '/leader.js' if leader_main else ''
-        ours_js_src = ours_main.rsplit('/', 1)[0] + '/ours.js' if ours_main else ''
+        leader_js_src = ''
+        ours_js_src = ''
+        if leader_main:
+            cand = leader_main.rsplit('/', 1)[0] + '/leader.js'
+            if (DASH_DIR / cand).exists():
+                leader_js_src = cand
+        if ours_main:
+            cand = ours_main.rsplit('/', 1)[0] + '/ours.js'
+            if (DASH_DIR / cand).exists():
+                ours_js_src = cand
 
         cls = r.get('classification') or {}
         cls_info = f"{cls.get('subject','')} · {cls.get('category','?')}" if cls.get('subject') else ''
