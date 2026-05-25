@@ -385,10 +385,155 @@ root.add(flame);
 //   and ADD a thin front plate. Open-front lanterns SKIP the front plate.
 ```
 
-The principle behind all seven: **the child's position is computed from the
-parent's KNOWN dimensions** (`bodyH`, `caseRadius`, `legH`, `glassR`, `stemH`, `W/H/D/t`, etc.).
+### Pattern H: surface-bound decoration on a lathe body (USE ONLY IF reference shows painted/printed motifs — flowers, decals, vines, logos, paint bands — lying flat on a curved/lathe body)
+
+Generic lathe geometry + scattered 3D blobs is the typical wrong answer.
+The right answer is two helpers + flat decal geometries:
+
+```javascript
+// Helper 1: piecewise-linear radius lookup along the lathe's profile.
+// Authored once next to the profile array, so any decal can ask "what is
+// the body radius at height y?" without re-doing the math.
+const profile = [
+  new THREE.Vector2(0.00, 0.00),
+  new THREE.Vector2(0.14, 0.00),
+  new THREE.Vector2(0.24, 0.35),
+  new THREE.Vector2(0.19, 0.55),
+  new THREE.Vector2(0.14, 0.70),
+  new THREE.Vector2(0.17, 0.85),
+  new THREE.Vector2(0.00, 0.85),
+];
+function getRadiusAtHeight(y) {
+  for (let i = 1; i < profile.length; i++) {
+    const a = profile[i - 1], b = profile[i];
+    if (y >= a.y && y <= b.y && b.y > a.y) {
+      const t = (y - a.y) / (b.y - a.y);
+      return a.x + (b.x - a.x) * t;
+    }
+  }
+  return profile[profile.length - 2].x;
+}
+
+// Helper 2: place a flat mesh tangent to the lathe surface at (angle, y).
+// `offset` (default 0.002) keeps it slightly outside to avoid z-fight.
+function placeOnSurface(mesh, angle, y, offset = 0.002) {
+  const r = getRadiusAtHeight(y) + offset;
+  mesh.position.set(Math.cos(angle) * r, y, Math.sin(angle) * r);
+  // Align mesh's +Z (CircleGeometry's default normal) to the outward normal.
+  const normal = new THREE.Vector3(Math.cos(angle), 0, Math.sin(angle));
+  mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+}
+
+// Decal geometry MUST be flat. NOT a sphere or extruded chunk.
+const petalGeo = new THREE.CircleGeometry(0.035, 16); petalGeo.scale(1, 0.6, 1);
+const leafShape = new THREE.Shape();
+leafShape.moveTo(0, 0);
+leafShape.quadraticCurveTo(0.03, 0.02, 0.06, 0);
+leafShape.quadraticCurveTo(0.03, -0.02, 0, 0);
+const leafGeo = new THREE.ExtrudeGeometry(leafShape, { depth: 0.001, bevelEnabled: false });
+leafGeo.center();
+
+// Bands that hug the silhouette: thin Cylinder at radius_at_y + tiny offset.
+const bandRadius = getRadiusAtHeight(0.55) + 0.002;
+const band = new THREE.Mesh(
+  new THREE.CylinderGeometry(bandRadius, bandRadius, 0.015, 32),
+  trimMat,
+);
+band.position.y = 0.55;
+root.add(band);
+```
+
+The killer-error this prevents: building petals as `SphereGeometry(0.04)` or
+leaves as `BoxGeometry(0.03,0.06,0.02)` — these stick OUT as 3D blobs and look
+nothing like printed pigment on glaze. Flat decals + `placeOnSurface` reads as
+"painted on" to both human eyes and the visual judge.
+
+### Pattern I: a cylindrical label wrapping a bottle / jar / can (USE ONLY IF reference shows a flat printed label on a primarily-cylindrical container)
+
+```javascript
+// CRITICAL: the label is a CylinderGeometry shell that MUST live entirely
+// within the constant-radius portion of the body. If the bottle profile
+// narrows at the shoulder, the label TOP must end BEFORE the narrowing
+// starts — otherwise the label sticks out past the silhouette.
+const bodyRadius = 0.30;
+const bodyHeight = 0.65;
+const shoulderStart = bodyHeight * 0.80;     // body narrows above this
+const labelHeight  = shoulderStart * 0.85;   // give a small margin
+const labelCenterY = labelHeight / 2;        // sits in lower portion only
+
+const labelGeo = new THREE.CylinderGeometry(
+  bodyRadius + 0.002,   // radius: tiny outside the body
+  bodyRadius + 0.002,
+  labelHeight,
+  32,
+  1,
+  true,                 // openEnded: shell, not disk
+  // NO thetaStart / thetaLength args → full 360° wrap.
+  // DO NOT pass `Math.PI * 1.9` — it leaves a visible seam.
+);
+const label = new THREE.Mesh(labelGeo, labelMat);
+label.position.y = labelCenterY;
+root.add(label);
+
+// Logo / text on the FRONT of the label sits at z = bodyRadius + 0.003
+// (just outside the label). CircleGeometry default normal is +Z, so no
+// rotation is needed.
+const logo = new THREE.Mesh(new THREE.CircleGeometry(0.08, 32), logoMat);
+logo.position.set(0, labelCenterY + labelHeight * 0.25, bodyRadius + 0.003);
+root.add(logo);
+```
+
+The killer-error this prevents: setting `labelHeight = 0.5` while the body
+narrows at 0.4 means the label cylinder pokes into open space at the
+shoulder. Either keep label height inside the constant-radius portion, OR
+use Pattern H's `getRadiusAtHeight()` and build the label as a few stacked
+shell segments that follow the silhouette.
+
+### Pattern J — Glass / transmissive material (critical API rule, applies whenever the reference shows clear or tinted glass: bulbs, bottles, glassware, windows)
+
+```javascript
+// CORRECT — transmission alone, NO opacity:
+const glassMat = new THREE.MeshPhysicalMaterial({
+  color: 0xffcc88,           // amber-tinted glass (or 0xffffff for clear)
+  metalness: 0.0,
+  roughness: 0.05,           // smooth — glass is not matte
+  transmission: 0.9,         // how much light passes through
+  transparent: true,         // must be true for transmission to render
+  ior: 1.5,                  // glass refractive index
+  thickness: 0.5,            // controls internal absorption
+  // DO NOT set `opacity`. opacity + transmission cancel each other in
+  // MeshPhysicalMaterial — the mesh renders as a solid tinted blob, NOT
+  // as see-through glass. If you set opacity here you have just spent the
+  // budget on transmission for nothing.
+});
+```
+
+The killer-error this prevents: a transparent reference (light bulb, drinking
+glass, perfume bottle) renders as an opaque-looking colored sphere because
+`opacity: 0.9` was left alongside `transmission: 0.9`. Pick exactly one.
+
+The principle behind all ten patterns: **the child's position is computed
+from the parent's KNOWN dimensions** (`bodyH`, `caseRadius`, `legH`, `glassR`,
+`stemH`, `W/H/D/t`, `bodyRadius`, `shoulderStart`, etc.).
 Magic numbers like `0.35` or `0.25` chosen by guess always end up overlapping
 or floating. Name your dimensions and derive positions arithmetically.
+
+# Composition discipline — fewer-but-correct beats more-but-wrong
+
+When the reference is busy (a sofa with 6 cushions; a vase with 30 painted
+flowers; a desk piled with stationery) it is tempting to model all of it.
+Don't. The judge punishes wrong-looking parts harder than missing details.
+Rules of thumb:
+
+- If you cannot make a part look RIGHT (correct shape, snug to its parent,
+  correct material), omit it. A clean two-cushion sofa beats a six-cushion
+  sofa where two cushions are floating slabs.
+- Anchor every part to a named parent dimension before adding the next.
+  If you cannot answer "how is this part attached?" in one sentence, the
+  attachment will be wrong.
+- Decoration counts (flowers, slats, ribs, keys) can drop by 2–3× without
+  visibly hurting fidelity — the judge sees ~256-pixel renders, dense small
+  decoration averages to mush either way.
 
 # Detached-parts checklist (run this in your head before emitting code)
 
