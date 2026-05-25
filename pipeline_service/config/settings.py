@@ -57,7 +57,7 @@ class LLMClientConfig(BaseModel):
         """Detect backend type from base_url."""
         _LOCAL_HOSTS = ("localhost", "127.0.0.1", "0.0.0.0")
         url = self.base_url.lower()
-        return "vllm" if any(h in url for h in _LOCAL_HOSTS) else "vllm"
+        return "vllm" if any(h in url for h in _LOCAL_HOSTS) else "openrouter"
 
 class ActorConfig(BaseModel):
     """Per-actor config."""
@@ -77,11 +77,11 @@ class ActorConfig(BaseModel):
 class ActorsConfig(BaseModel):
     planner: ActorConfig = ActorConfig(
         workers=2, queue_size=8,
-        client="vision", model="",
+        client="openrouter", model="qwen/qwen2.5-vl-72b-instruct",
     )
     coder: ActorConfig = ActorConfig(
         workers=2, queue_size=8,
-        client="coder", model="",
+        client="openrouter", model="qwen/qwen-2.5-72b-instruct",
         max_tokens=8192,
         ensemble_size=4,
         ensemble_temperature=0.3,
@@ -89,11 +89,11 @@ class ActorsConfig(BaseModel):
     patcher: ActorConfig = ActorConfig(workers=2, queue_size=8)
     critic: ActorConfig = ActorConfig(
         workers=3, queue_size=8,
-        client="vision", model="",
+        client="openrouter", model="qwen/qwen2.5-vl-72b-instruct",
     )
     judge: ActorConfig = ActorConfig(
         workers=3, queue_size=8,
-        client="vision", model="",
+        client="openrouter", model="qwen/qwen2.5-vl-72b-instruct",
         max_tokens=1024,
     )
     checker: ActorConfig = ActorConfig(workers=2, queue_size=8)
@@ -110,11 +110,15 @@ class EventBusConfig(BaseModel):
     score_threshold: float = 0.80
 
 def _default_llm_clients() -> dict[str, LLMClientConfig]:
-    """Default LLM clients — local vLLM only. No external API fallback."""
+    """Default LLM clients."""
     _DEFAULT_VISION = "http://localhost:8001/v1"
     _DEFAULT_CODER = "http://localhost:8002/v1"
+    _DEFAULT_OPENROUTER = "https://openrouter.ai/api/v1"
 
     return {
+        "openrouter": LLMClientConfig(
+            base_url=_DEFAULT_OPENROUTER, api_key_env="OPENROUTER_API_KEY", enabled=True,
+        ),
         "vision": LLMClientConfig(
             base_url=_DEFAULT_VISION, api_key_env="VLLM_API_KEY", enabled=True,
         ),
@@ -177,23 +181,25 @@ class SettingsConf(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_llm_client_topology(self) -> "SettingsConf":
-        """Client topology: local vLLM only. External API clients are not permitted."""
+        """Client topology: either 'openrouter' in llm_clients, or local vision+coder."""
         clients = self.llm_clients
-        forbidden = {"openrouter", "chutes"}
-        present_forbidden = sorted(forbidden & set(clients.keys()))
-        if present_forbidden:
+        if "openrouter" in clients:
+            return self
+        if "vision" not in clients or "coder" not in clients:
             raise ValueError(
-                f"External LLM clients are not permitted: {present_forbidden}. "
-                f"Remove them from llm_clients (local vLLM only)."
+                "You must have both vision and coder clients enabled."
             )
-        enabled_local = [
-            name for name, cfg in clients.items()
-            if cfg.enabled and cfg.vllm is not None and (cfg.vllm.model or "").strip()
-        ]
-        if not enabled_local:
-            raise ValueError(
-                "At least one local vLLM client must be enabled with a vllm.model set."
-            )
+        for label in ("vision", "coder"):
+            cfg = clients[label]
+            if not cfg.enabled:
+                raise ValueError(
+                    f"llm_clients.{label}.enabled=false is not allowed."
+                )
+            vllm = cfg.vllm
+            if vllm is None or not (vllm.model or "").strip():
+                raise ValueError(
+                    f"llm_clients.{label}: set vllm.model (HF repo id) so that run.sh can start the vLLM server."
+                )
         return self
 
 
