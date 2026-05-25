@@ -752,6 +752,32 @@ Rules:
 6. Materials: anodized aluminum (metalness 0.6, roughness 0.5), matte
    plastic (metalness 0.0, roughness 0.8), glossy plastic (roughness 0.3).
 """,
+    "gemstone": """# GEMSTONE/CRYSTAL-SPECIFIC GUIDANCE (read this first)
+
+Cut gems (diamond, emerald, ruby, sapphire) have BRILLIANT-CUT FACETS —
+many small triangular faces that catch light. The whole visual identity
+of a gem is its facet pattern. A low-poly prism with smooth sides reads
+as plastic, not gem.
+
+Rules:
+1. Use a faceted primitive — `IcosahedronGeometry`, `OctahedronGeometry`,
+   `DodecahedronGeometry` — instead of a smooth Lathe. Set detail=0 or 1
+   to keep the angular look (higher detail smooths the surface, losing
+   the gem feel).
+2. For a brilliant cut (round-top diamond/peridot/topaz): build with
+   LatheGeometry whose profile has 6-8 explicit segments, then COMBINE
+   with a top "table" — a flat octagonal/decagonal CircleGeometry. This
+   preserves the visible flat top and tapered pavilion.
+3. For square/emerald cut: ExtrudeGeometry with an octagonal Shape and
+   small bevel, plus a corner-trimmed Shape for the rectangular crown.
+4. Color: MeshPhysicalMaterial with `transmission: 0.5-0.8`, `ior: 1.7-
+   2.4`, `roughness: 0.05`, `clearcoat: 1.0`. The translucency reads as
+   "gem" not "plastic". Do NOT combine with `opacity` (Pattern J rule).
+5. Embedded gems in a setting: pair the gem mesh with metal prongs
+   (small cylinders) and a bezel (thin torus) around the base.
+6. AVOID: smooth Sphere/Box/single-Cylinder geometries — those read as
+   marbles or simple solid objects, not gems.
+""",
     "apparel": """# APPAREL/BAG-SPECIFIC GUIDANCE (read this first)
 
 Clothing, shoes, hats, bags — soft, draped, often complex outlines.
