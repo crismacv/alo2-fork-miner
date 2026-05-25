@@ -518,22 +518,29 @@ from the parent's KNOWN dimensions** (`bodyH`, `caseRadius`, `legH`, `glassR`,
 Magic numbers like `0.35` or `0.25` chosen by guess always end up overlapping
 or floating. Name your dimensions and derive positions arithmetically.
 
-# Composition discipline — fewer-but-correct beats more-but-wrong
+# Composition discipline — match the reference's complexity
 
-When the reference is busy (a sofa with 6 cushions; a vase with 30 painted
-flowers; a desk piled with stationery) it is tempting to model all of it.
-Don't. The judge punishes wrong-looking parts harder than missing details.
-Rules of thumb:
+The judge punishes BOTH directions: clearly-missing parts ("this backpack
+has no shoulder straps") AND wrong-looking parts ("the cushion is a
+floating slab"). Calibrate to the reference, not to your taste:
 
-- If you cannot make a part look RIGHT (correct shape, snug to its parent,
-  correct material), omit it. A clean two-cushion sofa beats a six-cushion
-  sofa where two cushions are floating slabs.
+- **If the reference is busy** (sofa with 6 cushions; backpack with 3 side
+  pockets and dangling straps; bed with thick frame, feet, and tufted top):
+  you MUST model the major features. Each missing structural element costs
+  the same as one obviously-wrong element. Don't skip the side pockets.
+- **If the reference is minimal** (a single pear; a plain box): don't invent
+  decoration. Add only what the image actually shows.
+- Where you can't get a part to look right (correct shape, snug to its
+  parent, correct material), simplify it (one cushion instead of three) but
+  don't omit it entirely — a placeholder cushion reads as "cushion" to the
+  judge; absent cushions read as "missing".
 - Anchor every part to a named parent dimension before adding the next.
   If you cannot answer "how is this part attached?" in one sentence, the
   attachment will be wrong.
-- Decoration counts (flowers, slats, ribs, keys) can drop by 2–3× without
-  visibly hurting fidelity — the judge sees ~256-pixel renders, dense small
-  decoration averages to mush either way.
+- Decoration repetition counts (flowers, slats, ribs, keys) can drop by
+  2–3× without visibly hurting fidelity — the judge sees ~256-pixel
+  renders, dense small decoration averages to mush. But STRUCTURAL parts
+  (legs, straps, pockets, cushions, handles) cannot be dropped.
 
 # Detached-parts checklist (run this in your head before emitting code)
 
@@ -552,6 +559,17 @@ Before you finish, mentally trace the Y axis from y=0 upward:
    `bodyH/2 * f`. Centered primitives span ±half on each axis.
 4. If you can't easily compute `top_y` of a part, you've probably
    written too many magic-number offsets — refactor to named dims.
+5. **Tables / desks / cantilever legs**: legs hang DOWN from the underside
+   of the tabletop. The leg's `top_y` MUST equal `tabletop.y - tabletopH/2`
+   (the underside), NOT `tabletop.y` (the center) nor `0` (the floor).
+   The leg's `bottom_y` MUST be at the floor (often `-0.5` after
+   fitToUnitCube, or `0` in your local coords if the floor is at 0).
+   Common bug: `leg.position.y = legH / 2` puts the leg BOTTOM at 0 and
+   TOP at legH — leaving a giant air gap between leg top and tabletop
+   underside. Fix: `leg.position.y = tabletop.y - tabletopH/2 - legH/2`.
+   Same rule applies to ANY "hanging from underside" parts: feet on a
+   pedestal, casters on a chair base, finials under a clock, drawer
+   pulls under a desk apron.
 
 # Common pitfalls (each one of these has lost stems on this benchmark)
 
