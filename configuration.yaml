@@ -78,7 +78,7 @@ actors:
     queue_size: 16
 
 event_bus:
-  max_iter: 2
+  max_iter: 3
   task_deadline_s: 3600
   score_threshold: 0.55
 
