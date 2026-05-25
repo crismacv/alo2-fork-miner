@@ -48,8 +48,19 @@ specific reason.
    `matching_aspects`. The repair stage reads this list as a preserve-list
    and will tell the coder NOT to modify those parts; without it the coder
    often regresses correct parts while fixing flagged ones.
-5. Score with the rubric above.
-6. Emit the JSON.
+5. Identify 0–4 STRUCTURAL components that are PRESENT IN THE REFERENCE
+   BUT COMPLETELY ABSENT from the render — list them in
+   `missing_components` as short snake_case identifiers.
+   This is for things that are TOTALLY MISSING (not just wrong-sized).
+   Examples: 'interior_glow_plane', 'open_front_face',
+   'pedestal_base', 'second_handle', 'top_cap', 'window_frame',
+   'side_door', 'chimney', 'wheel_axle'. These get promoted to
+   top-priority in the repair prompt — adding a missing structural
+   component is a bigger improvement than tweaking proportions of an
+   existing one. If everything in the reference is at least
+   approximately represented, return an empty list.
+6. Score with the rubric above.
+7. Emit the JSON.
 
 ## Issue quality — be actionable, not generic
 
@@ -141,6 +152,10 @@ regenerating the whole module.
     "overall silhouette reads as a chair",
     "legs are four symmetric cylinders",
     "wood color approximately matches"
+  ],
+  "missing_components": [
+    "armrests",
+    "seat_cushion"
   ],
   "issues": [
     {

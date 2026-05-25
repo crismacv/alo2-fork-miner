@@ -39,7 +39,7 @@ class SceneCoderAgent:
         max_tokens: int = 8192,
         max_tool_iters: int = 4,
         max_output_retries: int = 2,
-        backend: str = "openrouter",
+        backend: str = "vllm",
         total_stages: int = 7,
     ) -> None:
         self.client = client
@@ -186,6 +186,7 @@ class SceneCoderAgent:
         issues: list[Issue] | list[dict[str, Any]],
         overall_score: float,
         matching_aspects: list[str] | None = None,
+        missing_components: list[str] | None = None,
         image_bytes: bytes | None = None,
         image_mime: str = "image/png",
         render_png: bytes | None = None,
@@ -207,19 +208,36 @@ class SceneCoderAgent:
             "\n".join(f"- {m}" for m in matching_aspects)
             if matching_aspects else "- (none flagged by critic — proceed carefully)"
         )
-        issues_json = json.dumps(normalized_issues, indent=2, ensure_ascii=False)
+        missing_block = (
+            "\n".join(f"- {m}" for m in missing_components)
+            if missing_components else "- (nothing flagged as entirely missing)"
+        )
+        # Render issues as a readable bullet list (kind + target + description).
+        if normalized_issues:
+            issues_lines: list[str] = []
+            for it in normalized_issues:
+                kind = it.get("kind", "issue")
+                tgt = it.get("target_node_id") or "—"
+                sev = it.get("severity", "medium")
+                desc = (it.get("description") or "").strip()
+                issues_lines.append(f"- [{sev}] {kind} @ {tgt}: {desc}")
+            issues_block = "\n".join(issues_lines)
+        else:
+            issues_block = "- (no fix-level issues flagged)"
         if osd is not None:
             user_text = CODER_USER_TEMPLATE_CRITIC_REPAIR.format(
                 osd_json=osd.model_dump_json(indent=2),
                 overall_score=f"{overall_score:.2f}",
-                issues_json=issues_json,
+                issues_block=issues_block,
                 matching_block=matching_block,
+                missing_block=missing_block,
             )
         else:
             user_text = CODER_USER_TEMPLATE_CRITIC_REPAIR_IMAGE.format(
                 overall_score=f"{overall_score:.2f}",
-                issues_json=issues_json,
+                issues_block=issues_block,
                 matching_block=matching_block,
+                missing_block=missing_block,
             )
         multimodal = image_bytes is not None and render_png is not None
         user_content: str | list[dict[str, Any]]

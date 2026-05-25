@@ -622,6 +622,7 @@ class Orchestrator:
                 issues=report.issues,
                 overall_score=report.overall_score,
                 matching_aspects=list(getattr(report, "matching_aspects", []) or []),
+                missing_components=list(getattr(report, "missing_components", []) or []),
                 image_bytes=task.image_bytes if self.coder_multimodal else None,
                 image_mime=task.image_mime,
                 render_png=task.rendered_png if self.coder_multimodal else None,

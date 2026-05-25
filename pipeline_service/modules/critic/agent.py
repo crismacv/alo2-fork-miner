@@ -89,7 +89,7 @@ class CriticAgent:
         max_retries: int = 2,
         reasoning_effort: str | None = None,
         ensemble_size: int = 1,
-        backend: str = "openrouter",
+        backend: str = "vllm",
         total_stages: int = 7,
     ) -> None:
         self.client = client
@@ -145,7 +145,7 @@ async def run_critic(
     max_retries: int = 2,
     reasoning_effort: str | None = None,
     ensemble_size: int = 1,
-    backend: str = "openrouter",
+    backend: str = "vllm",
     total_stages: int = 7,
     critic_stage: int = 5,
 ) -> CriticReport:
@@ -217,9 +217,29 @@ async def run_critic(
                 seen.add(key)
                 union_matching.append(m)
 
+    # Missing components: count frequency across ensemble. A component named
+    # by >= half the critics is treated as confirmed-missing; rare singletons
+    # are dropped as noise. The merged list is ordered by frequency desc.
+    miss_counts: dict[str, int] = {}
+    miss_first: dict[str, str] = {}
+    for r in reports:
+        for m in getattr(r, "missing_components", []) or []:
+            key = m.strip().lower()
+            if not key:
+                continue
+            miss_counts[key] = miss_counts.get(key, 0) + 1
+            miss_first.setdefault(key, m.strip())
+    threshold = max(1, (len(reports) + 1) // 2)  # majority
+    confirmed_missing = sorted(
+        [k for k, c in miss_counts.items() if c >= threshold],
+        key=lambda k: -miss_counts[k],
+    )
+    merged_missing = [miss_first[k] for k in confirmed_missing]
+
     merged = median_report.model_copy(update={
         "overall_score": mean_score,
         "matching_aspects": union_matching,
+        "missing_components": merged_missing,
     })
     logger.info(
         f"{stage_prefix} Finished Task {task_id} | Ensemble: {ensemble_size} | Scores: {[round(r.overall_score, 2) for r in reports]} | Mean: {mean_score:.2f} | Median: {median_report.overall_score:.2f} | Issues: {len(merged.issues)}"

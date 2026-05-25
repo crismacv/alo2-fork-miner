@@ -93,3 +93,15 @@ class CriticReport(BaseModel):
             "prevent regression between iterations."
         ),
     )
+    missing_components: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Short phrases naming components that are present in the REFERENCE "
+            "but COMPLETELY ABSENT from the render (not just wrong-sized — "
+            "fully missing). Examples: 'interior_glow_plane', "
+            "'open_front_face', 'pedestal_base', 'second_handle'. The repair "
+            "stage promotes these to top-priority because adding a missing "
+            "structural component is a bigger improvement than tweaking an "
+            "existing part."
+        ),
+    )
