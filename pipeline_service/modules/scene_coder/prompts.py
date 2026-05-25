@@ -645,11 +645,154 @@ Examples below demonstrate the style. Study them, then write your own.
 )
 
 
+# Category-specialized PREAMBLES. These get prepended to CODER_SYSTEM_PROMPT
+# when the classifier picks the matching category. Each is short (≤30 lines)
+# and named so the model sees "FOOD GUIDANCE" / "VEHICLE GUIDANCE" at the top
+# before all the general patterns. This addresses the user observation that
+# one universal generation algorithm fails: e.g. fruit blush should be a
+# material region, NOT a separate 3D protrusion (iter16 quince loss).
+
+CATEGORY_GUIDANCE = {
+    "food": """# FOOD-SPECIFIC GUIDANCE (read this first, BEFORE the general rules)
+
+Foods are ORGANIC bodies. Their visible color variations come from natural
+pigment differences on the SAME surface, not from additional parts. Common
+failure: modeling the red blush on a quince/peach/apple as separate 3D oval
+meshes attached to the body. That looks like cartoon stickers, not fruit.
+
+Rules:
+1. **NO additive 3D meshes for color zones.** A blush, freckles, ripeness
+   gradient, browning spots — these are color variations on the SAME
+   body surface, never new geometry on top.
+2. To express a two-tone fruit (yellow with red blush on top), split the
+   body into TWO Lathe sections vertically, OR use a single SphereGeometry
+   with a `MeshStandardMaterial` whose vertex colors transition. Easiest:
+   make the TOP portion of the Lathe profile use the secondary color
+   material via a second mesh sharing the same profile but theta-limited
+   to the relevant arc.
+3. Preferred bodies: SphereGeometry (apple/orange), Lathe with smooth
+   curved profile (pear/quince/squash), ExtrudeGeometry with a Shape
+   (banana/leaf-shaped), CapsuleGeometry (zucchini/banana).
+4. Stem: small CylinderGeometry on top, slight rotation if it leans.
+   Often green; sometimes brown. Always at the navel / pole, never on
+   the side of the body.
+5. Leaves (if present): flat ExtrudeGeometry with depth ≤ 0.002, near the
+   stem. Don't make leaves more prominent than the fruit.
+6. Surface roughness: 0.4-0.6 for waxy fruit (apple), 0.7-0.85 for matte
+   (peach skin), 0.3-0.5 for citrus.
+""",
+    "vehicle": """# VEHICLE-SPECIFIC GUIDANCE (read this first)
+
+Vehicles need GROUND CONTACT and SYMMETRIC WHEEL PLACEMENT, both of which
+the general builder pattern often gets wrong.
+
+Rules:
+1. The vehicle's bottom (wheel contact plane) sits at y = -0.5 after
+   fitToUnitCube. Wheels MUST touch this plane — no flying cars.
+2. Wheels: rotate cylinders along their axle (e.g. `wheel.rotation.z =
+   Math.PI / 2` for cars). Each wheel pair is mirrored over X axis.
+3. Standard count: cars/trucks 4, motorcycles 2, planes 2-3, drones 4-8
+   rotors, bicycles 2, boats 0 (hull is the contact body).
+4. Headlights, grille, windows, mirrors, antennas — model them small, in
+   correct positions on the chassis. Use bevel-extruded shapes for
+   windshields (curved on top, flat at bottom).
+5. Color zones (blue+yellow+blue stripes on a boat, two-tone car body):
+   model with separate Box/Extrude meshes per band, not as protrusions.
+""",
+    "pottery": """# POTTERY/CONTAINER-SPECIFIC GUIDANCE (read this first)
+
+Vases, bottles, lanterns, ceramic bodies — these are rotationally
+symmetric, so Lathe is the right primitive. Pattern F (Lathe profile
+rules) and Pattern H (surface decoration on Lathe) below are the key
+recipes for this category. If the reference shows a label, see Pattern I.
+
+Rules:
+1. Lathe profile: monotone Y, first point at r=0 if closed body, full
+   360° sweep unless reference clearly shows a gap.
+2. Paint/decals/flowers on the body MUST be flat (CircleGeometry, very-
+   thin ExtrudeGeometry depth ≤ 0.002). Use `getRadiusAtHeight` +
+   `placeOnSurface` helpers (see Pattern H below).
+3. Decorative bands: thin Cylinder at radius_at_y + tiny offset.
+4. If two-tone (red trim on cream body): the trim is its own Cylinder/
+   thin-Lathe ring, not a 3D protrusion.
+""",
+    "creature": """# CREATURE-SPECIFIC GUIDANCE (read this first)
+
+Animals, characters, figurines — these are clusters of organic body
+parts (head, torso, limbs, tail). Compose them carefully so the figure
+reads as ONE creature, not floating limbs.
+
+Rules:
+1. Spine first: a vertical Cylinder/Capsule/spline-tube as the torso.
+2. Head: SphereGeometry above the torso, slightly forward or tilted.
+3. Limbs: CylinderGeometry, mounted at the torso, pointing in correct
+   directions. Pair limbs symmetrically.
+4. Tail (if present): a TubeGeometry along a CatmullRomCurve3 OR a tapered Cylinder.
+5. Surface color zones (spots, stripes, blush): NOT new geometry, but
+   either separate body-part meshes with their own materials (white belly
+   vs gray back) or a SECOND mesh sharing the body shape with limited
+   theta/extent.
+""",
+    "machine": """# MACHINE/DEVICE-SPECIFIC GUIDANCE (read this first)
+
+Calculators, phones, cameras, gauges, instruments — these are rectangular
+or rounded-rectangular bodies COVERED IN FEATURES (screen, buttons, ports,
+lens, lights, badge). The general failure is collapsing to a featureless
+slab. Don't do that.
+
+Rules:
+1. Body: ExtrudeGeometry with a rounded-rectangle Shape + bevel (real
+   consumer-electronics finish). Not a sharp BoxGeometry.
+2. Screen: a thin Plane/Box recessed into the front face (~0.005 inset).
+3. Buttons: small CylinderGeometry or rounded Box, ALWAYS in a grid for
+   keypads (nested for-loop with named step constants).
+4. Ports/jacks: small dark recessed Boxes on the edges.
+5. Surface labels/text: thin Box letters on the face, OR skip if the
+   text is too small to be visually meaningful at 256px render.
+6. Materials: anodized aluminum (metalness 0.6, roughness 0.5), matte
+   plastic (metalness 0.0, roughness 0.8), glossy plastic (roughness 0.3).
+""",
+    "apparel": """# APPAREL/BAG-SPECIFIC GUIDANCE (read this first)
+
+Clothing, shoes, hats, bags — soft, draped, often complex outlines.
+
+Rules:
+1. Bags/backpacks: rounded box body (ExtrudeGeometry + bevel) + multiple
+   distinct pockets (each its own panel mesh in front), + STRAPS as
+   TubeGeometry along curves. Don't skip the straps — the visual judge
+   penalizes missing straps hard.
+2. Clothes on a mannequin: torso + skirt/pants/shirt as separate
+   ExtrudeGeometry/Lathe parts.
+3. Hats: short Lathe body + brim as flat thin Cylinder.
+4. Shoes: a slipper-shape ExtrudeGeometry with bevel for the upper, a
+   thin Box for the sole.
+5. Pattern motifs (stripes/floral/dots) on apparel: flat decals via
+   Pattern H, never new geometry.
+""",
+}
+
+
 def build_system_prompt(categories=None) -> str:
-    """R10: prompt is small enough that category pruning is no longer
-    necessary. Always returns the full prompt. Argument retained for
-    backward compatibility with caller scripts."""
-    return CODER_SYSTEM_PROMPT
+    """Prepend category-specialized guidance to the general system prompt.
+
+    Categories come from the GLM classifier (food / vehicle / pottery /
+    creature / machine / apparel / furniture / multi_subject /
+    single_other). If we have specialized guidance for the category it
+    goes ABOVE the general rules so the model reads it first.
+    """
+    if not categories:
+        return CODER_SYSTEM_PROMPT
+    if isinstance(categories, str):
+        cats = [categories]
+    else:
+        cats = list(categories)
+    preamble = ""
+    for cat in cats:
+        if cat in CATEGORY_GUIDANCE:
+            preamble += CATEGORY_GUIDANCE[cat] + "\n\n"
+    if not preamble:
+        return CODER_SYSTEM_PROMPT
+    return preamble + CODER_SYSTEM_PROMPT
 
 
 CODER_USER_TEMPLATE_OSD = """Object Structural Description (OSD):
