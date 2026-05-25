@@ -300,4 +300,109 @@ Style notes:
 - 4×4 keypad uses nested for-loop with named step constants — easy to
   tweak.
 - Materials capped at metalness 0.5 (solar is the only metallic-ish part).
+
+### Example 3 — Wooden lantern (5-wall hollow open-front body + interior emissive glow + candle + flame + handle ring)
+
+Pattern G in practice. The "lantern", "shadow box", "fireplace", and "display case"
+classes all share the same structure: walls on 5 sides (front intentionally
+empty), an emissive plate sitting just in front of the back wall to read as
+interior light, and a candle / flame / contents inside the cavity.
+
+```javascript
+export default function generate(THREE) {
+  const root = new THREE.Group();
+
+  const woodMat   = new THREE.MeshStandardMaterial({ color: 0xd2b48c, roughness: 0.85, metalness: 0.0 });
+  const metalMat  = new THREE.MeshStandardMaterial({ color: 0x8899aa, roughness: 0.4, metalness: 0.6 });
+  const candleMat = new THREE.MeshStandardMaterial({ color: 0xffffee, roughness: 0.3, metalness: 0.0 });
+  const glowMat   = new THREE.MeshBasicMaterial({ color: 0xffaa00, side: THREE.DoubleSide });
+  const flameMat  = new THREE.MeshBasicMaterial({ color: 0xffcc00 });
+
+  const W = 0.60, H = 0.80, D = 0.45;   // outer dims
+  const t = 0.05;                        // wall thickness
+  const capR = 0.14, capH = 0.10;
+  const handleR = 0.10, handleTube = 0.025;
+
+  // 5-wall body (front INTENTIONALLY empty — that's how the lantern reads as open)
+  const back   = new THREE.Mesh(new THREE.BoxGeometry(W, H, t), woodMat);
+  const left   = new THREE.Mesh(new THREE.BoxGeometry(t, H, D), woodMat);
+  const right  = new THREE.Mesh(new THREE.BoxGeometry(t, H, D), woodMat);
+  const top    = new THREE.Mesh(new THREE.BoxGeometry(W, t, D), woodMat);
+  const bottom = new THREE.Mesh(new THREE.BoxGeometry(W, t, D), woodMat);
+  back.position.set(0,            0,        -D/2 + t/2);
+  left.position.set(-W/2 + t/2,   0,         0);
+  right.position.set( W/2 - t/2,  0,         0);
+  top.position.set(0,             H/2 - t/2, 0);
+  bottom.position.set(0,         -H/2 + t/2, 0);
+  root.add(back, left, right, top, bottom);
+
+  // Cap above the body, then a vertical torus handle sitting on the cap.
+  const cap = new THREE.Mesh(new THREE.CylinderGeometry(capR, capR, capH, 32), woodMat);
+  cap.position.set(0, H/2 + capH/2, 0);
+  root.add(cap);
+
+  // Torus default is in XY (normal +Z). Rotating Z by PI/2 puts the ring
+  // upright in YZ (so it reads as a handle, not a ring lying flat).
+  const handle = new THREE.Mesh(new THREE.TorusGeometry(handleR, handleTube, 16, 32), metalMat);
+  handle.rotation.z = Math.PI / 2;
+  handle.position.set(0, H/2 + capH + handleR * 0.8, 0);
+  root.add(handle);
+
+  // Decorative bolt heads on the four corners of the front edge.
+  const boltR = 0.025, boltH = 0.015;
+  const boltOX = W/2 - t * 0.8, boltOY = H/2 - t * 0.8;
+  const boltZ = D/2 + boltH/2 - 0.005;
+  [[-1, 1], [1, 1], [-1, -1], [1, -1]].forEach(([sx, sy]) => {
+    const bolt = new THREE.Mesh(new THREE.CylinderGeometry(boltR, boltR, boltH, 16), metalMat);
+    bolt.rotation.x = Math.PI / 2;
+    bolt.position.set(sx * boltOX, sy * boltOY, boltZ);
+    root.add(bolt);
+  });
+
+  // Interior glow: emissive plate ~10mm in front of the inner back wall.
+  // MeshBasicMaterial ignores lighting so it reads as a self-illuminated panel.
+  const glow = new THREE.Mesh(
+    new THREE.PlaneGeometry(W - 2*t - 0.02, H - 2*t - 0.02),
+    glowMat,
+  );
+  glow.position.set(0, 0, -D/2 + t + 0.01);
+  root.add(glow);
+
+  // Candle pillar sitting on the inner floor.
+  const candleR = 0.08, candleH = 0.15;
+  const candle = new THREE.Mesh(new THREE.CylinderGeometry(candleR, candleR, candleH, 16), candleMat);
+  candle.position.set(0, -H/2 + t + candleH/2, 0);
+  root.add(candle);
+
+  // Teardrop flame: stretched-Y sphere with MeshBasicMaterial (so it glows).
+  const flame = new THREE.Mesh(new THREE.SphereGeometry(0.04, 16, 16), flameMat);
+  flame.scale.set(1, 1.6, 1);
+  flame.position.set(0, candle.position.y + candleH/2 + 0.03, 0);
+  root.add(flame);
+
+  fitToUnitCube(THREE, root);
+  return root;
+}
+
+function fitToUnitCube(THREE, root) {
+  const box = new THREE.Box3().setFromObject(root);
+  const size = new THREE.Vector3(); box.getSize(size);
+  const center = new THREE.Vector3(); box.getCenter(center);
+  const maxDim = Math.max(size.x, size.y, size.z) || 1;
+  const scale = 0.95 / maxDim;
+  root.scale.setScalar(scale);
+  root.position.set(-center.x * scale, -center.y * scale, -center.z * scale);
+}
+```
+
+Style notes:
+- Front-face plate is INTENTIONALLY omitted — that single decision is what
+  makes a lantern read as a lantern instead of a TV with a small cutout.
+- `MeshBasicMaterial` for the glow + flame so they ignore scene lighting and
+  read as self-emissive (no environment map → MeshStandardMaterial emissive
+  is unreliable; MeshBasicMaterial always renders the color directly).
+- All child positions derived from `W, H, D, t` — no magic offsets, so the
+  whole module rescales cleanly if dimensions are tweaked.
+- Bolts done with a `[[sx, sy]]` array and one Mesh-per-iteration; symmetric
+  corners without four copy-pasted blocks.
 '''
