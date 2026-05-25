@@ -110,6 +110,25 @@ function fitToUnitCube(THREE, root) { /* see spec */ }
 
 # How to think about the reference
 
+**Reference layout may be a grid.** If the reference image you receive looks
+like a 2x2 grid of similar objects (or 2x3, 3x3), those are NOT separate
+objects — they are MULTI-VIEW renderings of the SAME object from different
+angles (typically front / 45° / 90° side / 180° back). Use ALL panels
+together to understand the 3D structure:
+- The 45° panel reveals 3/4 angle features.
+- The 90° SIDE panel shows depth, profile silhouette, side-mounted parts
+  (handles, arms, X-frame mechanisms, hanging straps) that are invisible
+  from the front.
+- The 180° BACK panel shows back-only features (or confirms symmetry).
+- The original / front panel is the canonical view you must match.
+Model ONE object with the features that all four views together reveal.
+Never model 4 objects. The grid is a viewing aid, not an inventory.
+
+**Reference layout may be a 2-panel grid (top = shape, bottom = pattern).**
+This is the pattern-extract output: top tile is the foreground object you
+must model, bottom tile is a flat texture/pattern you must apply to the
+correct surface. The bottom panel is NOT a separate object.
+
 Before writing any geometry, answer these in your head:
 
 1. **What is the OBJECT CLASS?** (a noun: "pocket watch", "yellow pumpkin",
