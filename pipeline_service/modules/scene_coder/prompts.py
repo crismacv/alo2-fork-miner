@@ -129,6 +129,22 @@ This is the pattern-extract output: top tile is the foreground object you
 must model, bottom tile is a flat texture/pattern you must apply to the
 correct surface. The bottom panel is NOT a separate object.
 
+**Reference layout may be a PARTS STRIP** (top = full reference, bottom row
+= individual parts isolated, each labeled with its name like SEAT_CUSHION,
+RING_HANDLE, WOODEN_X_FRAME). When you see this layout:
+- The bottom-row tiles are NOT separate objects. They are PARTS of the
+  one object shown on top. Each tile shows what one named part looks like
+  in isolation — its silhouette, color, material.
+- Use the bottom tiles as authoritative shape references for each part.
+  e.g. if WOODEN_X_FRAME tile shows a crossed-leg structure, you MUST
+  emit a crossed-leg structure for that part — don't simplify to four
+  vertical legs.
+- Use the top tile for SPATIAL ARRANGEMENT (where each part goes,
+  proportions, occlusion).
+- Model the parts as separate Meshes/Groups, then position them per the
+  top reference. Name your `const` variables to MATCH the part labels
+  (e.g. `seat_cushion`, `ring_handle`, `wooden_x_frame`).
+
 Before writing any geometry, answer these in your head:
 
 1. **What is the OBJECT CLASS?** (a noun: "pocket watch", "yellow pumpkin",
