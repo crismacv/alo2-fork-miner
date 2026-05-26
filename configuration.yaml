@@ -47,8 +47,8 @@ actors:
     temperature: 0.0
     multimodal: true
     seed: 42
-    ensemble_size: 6
-    ensemble_temperature: 0.3
+    ensemble_size: 10
+    ensemble_temperature: 0.4
   patcher:
     workers: 6
     queue_size: 16
